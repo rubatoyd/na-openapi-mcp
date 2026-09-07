@@ -1,0 +1,114 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="ko" xml:lang="ko">
+	<head>
+	<meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+	<title>국회도서관 OpenAPI 활용 가이드</title>
+	<link rel="stylesheet" type="text/css" href="./css2/common.css" />
+	</head>
+	<body>
+    	<div id="wrap">
+            <div id="hearder"><!--상단 시작-->
+				<div id="hearder_center">
+					<h1><a href="./index.html"><img src="img/common/heder_simbol.gif" alt="국회도서관"/></a></h1>
+					<h2 class="skip">주메뉴</h2>
+						<ul class="navi">
+							<li class="navi_01"><a href="./S1001.html"><span class="skip">OpenAPI개요</span></a></li>
+							<li class="navi_02"><a href="./S2001.html"><span class="skip">서비스소개</span></a></li>
+							<li class="navi_03"><a href="./S3001.html"><span class="skip">서비스명세</span></a></li>
+							<!--li class="navi_03"><a href="https://openapi.nanet.go.kr/nadl/S3004_01_01.jsp"><span class="skip">서비스명세</span></a></li-->
+							<li class="navi_04"><a href="./S4001.html"><span class="skip">참고정보</span></a></li>
+						</ul>
+				</div>
+            </div><!--상단 끝-->
+            <div id="container"><!--콘테이너 시작-->
+            
+			<div class="left"><!--콘텐츠 왼쪽 시작-->
+                 <div><!--왼쪽메뉴 시작-->
+                      <h3 class="skip">왼쪽메뉴</h3>
+                        <div class="left_menu_title bold">서비스 소개</div>
+                        <div class="left_menu">
+                            <ul>
+                            <li><a href="S2001.html" class="left_menu_2sub menu_on">OpenAP 서비스 종류</a></li>
+                            <li><a href="S2002.html" class="left_menu_2sub">자료검색 DB 소개</a></li>
+                            </ul>
+                        </div>
+                        <div class="left_menu_bottom"></div>
+                    </div><!--왼쪽메뉴 --> 
+                </div><!--콘텐츠 왼쪽 끝-->
+                
+                <div class="right"><!--오른쪽 시작-->
+                	<h1 class="sub_title_01"><span>OpenAPI 서비스 종류</span></h1>
+                    <div class="table_D_zone"><!--테이블 A존 시 -->
+                        <table class="table_03" summary="항목명, 항목크기, 구분, 샘플데이터, 항목설명을 보여주는 표입니다." >
+                                <colgroup>
+                                    <col style="width: 6%;">
+                                    <col style="width: 12%;">
+                                    <col style="width: 32%;">
+                                    <col style="width: 10%;">
+                                    <col style="width: 40%;">
+                                </colgroup>
+                                    <thead>
+                                        <tr>
+                                            <td colspan="2">API 명칭</td>
+											<td>서비스 내용</td>
+											<td>전송방식</td>
+                                            <td class="bor_none">요청 URL</td>
+                                           </tr >
+                                    </thead>
+                                    <tfoot></tfoot>
+                                    <tbody>
+                                        <tr>
+                                            <td colspan="2" class="back_color">공지사항 조회</td>
+											<td>가장 최근에 등록된 국회전자도서관 공지사항 5건을 조회하여 제공</td>
+											<td>REST</td>
+                                            <td class="bor_none text_left">http://apis.data.go.kr/9720000/nadl/noticeservice</td>
+                                         </tr>
+                                         <tr>
+                                            <td rowspan="2" class="back_color">자<br />
+                                              료<br />
+                                              검<br />
+                                            색</td>
+                                            <td class="back_color">통합검색<br>목록조회</td>
+											<td >도서자료, 학위논문 등의 목록DB를 키워드로 통합검색하는 서비스</td>
+											<td>REST</td>
+                                            <td class="bor_none text_left">http://apis.data.go.kr/9720000/searchservice/basic</td>
+                                         </tr>
+                                         <tr>
+                                           <td class="back_color">상세검색<br>목록조회</td>
+                                            <td >도서자료, 학위논문 등의 목록DB를 키워드와 검색대상, 검색조건 등을 사용하여 상세검색하는 서비스</td>
+											<td>REST</td>
+                                            <td class="bor_none">http://apis.data.go.kr/9720000/searchservice/detail</td>
+                                         </tr>
+                                         <tr>
+                                            <td rowspan="2" class="back_color">상<br />
+                                              세<br />
+                                              정<br />
+                                              보<br />
+                                              조<br />
+                                            회</td>
+                                            <td class="back_color">상세정보<br>조회</td>
+											<td >검색서비스를 사용하여 검색된 자료 1건에 대해서 서명, 저자명 등 기본정보 외에 보다 상세한 정보를 제공하는 서비스</td>
+											<td>REST</td>
+                                            <td class="bor_none text_left">http://apis.data.go.kr/9720000/detailinfoservice/detail</td>
+                                         </tr>
+                                         <tr>
+                                            <td class="back_color">목차정보<br>조회</td>
+                                            <td ><span class="back_color">검색서비스를 사용하여 검색된자료 1건에 대해 목차정보를 제공하는 서비스</span></td>
+											<td>REST</td>
+                                            <td class="bor_none text_left">http://apis.data.go.kr/9720000/detailinfoservice/toc</td>
+                                         </tr>
+                                    </tbody>
+                                </table>         
+                    </div><!--테이블 A존 끝-->
+                    
+                   	
+				
+                </div><!--오른쪽 끝-->
+             </div><!--콘테이너 끝-->
+            
+            <div id="footer"><!--풋터 시작-->
+            	<address class="address"><em>국회도서관 전자정보정책과 | </em> 서울 영등포구 의사당대로 1 / 신청·승인 02-6788-4120, 제공·오류 02-6788-4150 / nadlinfo@nanet.go.kr</address>
+            </div><!--풋터 끝-->
+        </div>
+	</body>
+</html>

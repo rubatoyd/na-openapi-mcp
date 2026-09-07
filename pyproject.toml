@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "na-openapi-mcp"
+version = "0.1.0"
+description = "MCP server + CLI for the National Assembly Library of Korea (국회도서관) OpenAPI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Yeondong Yang" }]
+keywords = ["mcp", "nanet", "national-assembly-library", "korea", "openapi", "library", "bibliography", "metadata"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Text Processing :: Indexing",
+]
+dependencies = [
+    "mcp>=1.2.0,<2",  # 상한 필수 — mcp 2.0 에서 mcp.server.fastmcp 가 제거됐다.
+                      # 상한이 없으면 uvx/uv 경로가 매번 2.x 를 새로 해석해 기동이 죽는다
+                      # (uv.lock 은 클라이언트 경로에 적용되지 않으므로 방어선은 여기뿐).
+                      # 자매 프로젝트 kci·scienceon·nl 이 각각 이 상한 누락으로 기동 불능을 겪었다.
+    "requests>=2.31.0",
+    "openpyxl>=3.1.0",
+    "python-dotenv>=1.0.0",
+    "truststore>=0.9",  # 교육망/사내망 SSL 인터셉션 대응(OS 신뢰저장소 사용, 검증은 유지)
+]
+
+[project.scripts]
+na-openapi-mcp = "na_mcp.server:main"   # 패키지명과 동일 — `uvx na-openapi-mcp` 로 바로 실행
+na-mcp = "na_mcp.server:main"           # 짧은 별칭 (MCP 등록에 사용)
+na = "na_mcp.cli:main"                  # CLI
+
+[project.urls]
+Homepage = "https://github.com/rubatoyd/na-openapi-mcp"
+Repository = "https://github.com/rubatoyd/na-openapi-mcp"
+Issues = "https://github.com/rubatoyd/na-openapi-mcp/issues"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/na_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

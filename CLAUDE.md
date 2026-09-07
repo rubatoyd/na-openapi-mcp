@@ -1,0 +1,177 @@
+# na-openapi-mcp — 프로젝트 지침
+
+> **국회도서관(NA·NANET)** OpenAPI 수집기. 공개 **MCP 서버 + CLI**.
+> 자매 프로젝트 **nl-openapi-mcp**(`../NL openAPI`) · **kci-openapi-mcp**(`../KCI openAPI`) ·
+> **scienceON-mcp**(`../scienceon`) 와 동일 아키텍처.
+> API 규격 → docs/NA_API_GUIDE.md · 이력 → docs/작업일지.md
+
+## 1. 목표
+연구 초반 **자료수집 단계**의 반복 재사용 도구. 국회도서관 서지·소장 정보를 검색·수집해
+후속 분석 입력 데이터를 안정적으로 생산한다.
+자매 3종과 **상호보완**: KCI·ScienceON = 학술논문, NL = 단행본·회색문헌,
+**NA = 입법·정책 문헌**(의회 자료·정책연구·회색문헌) 축을 담당한다.
+
+## 2. 확정 결정사항
+| 항목 | 결정 |
+|------|------|
+| 언어/런타임 | Python 3.10+ |
+| 패키지 관리 | **uv** (pyproject + uv.lock). venv 는 **클라우드 폴더 밖** `C:/Users/user/.venvs/na-openapi-mcp` (`UV_PROJECT_ENVIRONMENT`, `.claude/settings.local.json` 에 지정) |
+| 의존성 | mcp(FastMCP, **`<2` 상한 필수**), requests, openpyxl, python-dotenv, truststore |
+| 인터페이스 | 공용 코어 + **MCP 서버(server.py)** + **CLI(cli.py)** |
+| 대상 API | **자료검색** `apis.data.go.kr/9720000/searchservice/{basic,detail}` (XML). data.go.kr 15098174 |
+| 출력 | xlsx · csv · json · sqlite |
+| 공개 | MIT. `.env`·`.claude/settings.local.json`·`output/`·`probe-out/` 는 gitignore |
+
+## 3. 구조 (자매 프로젝트와 레이어 일치)
+```
+src/na_mcp/
+  config.py     # .env 로딩, 엔드포인트, 상한 상수, use_os_trust()
+  models.py     # 레코드 스키마(실응답 기반) + 정규화
+  parser.py     # 응답 봉투 파싱 · 오류코드 → ParseError · 봉투에서 자격증명 제거
+  client.py     # 검색/페이징/재시도 + search_meta(절단 노출) + search_terms_meta(합집합)
+  exporters.py  # xlsx/csv/json/sqlite (+ safe_name 경로이탈 차단)
+  server.py     # MCP 도구: na_status / na_search / na_collect / na_detail / na_toc / na_fields
+  cli.py        # status / search / collect / detail / toc / fields
+docs/           # NA_API_GUIDE.md(★ 실측 스키마) · 작업일지.md · ARCHITECTURE.md
+scripts/probe_api.py    # ★ 라이브 탐침 — 파라미터명·스키마·키 인코딩 판별
+scripts/probe_limits.py # ★ 상한·유효값 실측 — displaylines·pageno·폴백·dbname
+                        #   markup(하이라이트 오염 필드) · categories(dbname×항목 전수)
+tests/          # 실응답 발췌 기반 파서·절단·서버·내보내기 회귀
+```
+
+## 4. 자격증명
+- 변수: **`NA_API_KEY`**(Decoding 원문) / `NA_API_KEY_ENCODED`(Encoding). 하나만 있어도 된다.
+- 🔴 **data.go.kr 이중 인코딩 함정** — Encoding 키를 `requests` 의 `params=` 로 넘기면
+  `%` 가 `%25` 로 재인코딩되어 **서버가 다른 키를 받는다**. 증상은 그냥 '인증 오류'라
+  원인 추적이 어렵다. `params=` 에는 **Decoding**, URL 직접 결합에는 **Encoding**.
+  판별은 `scripts/probe_api.py keymode <url>` (대조군 `key=none` 포함).
+- `NA_OS_TRUST`(기본 1): 교육망·사내망 SSL 인터셉션 대응. 0 이면 비활성.
+- ⚠️ 인증키는 코드/로그/커밋 금지 — `.env`(gitignore) 또는 `.claude/settings.local.json` env 로만.
+
+## 5. MCP 도구 (자매 프로젝트의 3종 + 이 API 고유의 1종)
+| 도구 | 설명 |
+|------|------|
+| `na_status` | 인증키 보유 여부 + 실제 왕복 1회 |
+| `na_search` | 검색. `total`·`truncated`·`cap_hit` 동반 반환 |
+| `na_collect` | 검색어 합집합 수집 → xlsx/csv/json/sqlite |
+| `na_detail` | 제어번호 1건 상세정보(검색보다 필드 多). `detailinfoservice` |
+| `na_toc` | 제어번호 1건 목차(HTML 이스케이프 해제 후 반환) |
+| `na_fields` | **검색항목·dbname 유효값 + 실측 근거.** §6-B 의 함정 때문에 추가했다 — 호출자가 이름을 지어내면 전체 카탈로그를 결과로 받는다 |
+
+## 6. 핵심 기술사실 (2026-09-07 라이브 실측 — 약 150회 호출로 확정)
+> 전체 규격·근거표 → [docs/NA_API_GUIDE.md](docs/NA_API_GUIDE.md). 재현: `scripts/probe_api.py`·`scripts/probe_limits.py`
+
+### (A) 🔴 공식 문서(.hwp)가 실제와 다르다 — 문서만 보고 만들면 조용히 깨진다
+| 항목 | 문서 | ✅ 실제 |
+|---|---|---|
+| 레코드 태그 | `<record>` | **`<recode>`** — 문서대로면 **전건 0개 회수 + total 은 정상**(조용한 절단) |
+| `<item>` 자식 순서 | value→name | **name→value** — 순서 의존 파싱 금지 |
+| 제어번호 필드명 | `controlno` | **`제어번호`** |
+| 자료명 | `자료명/저자사항`(합침) | **`기사명`/`자료명` + `저자명` 분리** |
+| `displaylines` 상한 | 100 | **1000** (문서대로면 호출 수 10배) |
+
+파서는 **양쪽 다** 받아들이고 어느 쪽이 왔는지 `record_tag` 로 보고한다.
+
+### (B) 🔴 미지원 검색항목 = 오류 아님, **검색어를 통째로 무시하고 전체 카탈로그 반환**
+실측(`오욱환`): 전체 105 · 기본검색 88 · 자료명 4 · 저자 76 · 키워드 7 · 발행자 0 · 청구기호 0
+↔ **저자명 / ISBN / 발행년도 / zzz = 전부 13,097,591건(전체 DB)**
+자매 API(국립중앙도서관)의 '전 필드 폴백'보다 **더 위험하다**. `저자명` 은 상세검색에서는
+유효한 이름이라 오타가 아니라 헷갈려서 쓰기 쉽다. → `config.validate_search()` 로 **거부**한다.
+
+### (C) 🔑 인증키는 **Encoding 키를 URL 에 직접 결합**해야 한다
+실측 대조: Decoding 키를 `params=` 로 → ❌ ERR04 / **Encoding 키를 URL 결합 → ✅ 00** / 키 없음 → 401.
+`params=` 로 넘기면 `%2B` 가 `%252B` 로 **이중 인코딩**된다. 결합은 `config.build_url()` **한 곳**에서만.
+
+### (D) 페이징: `pageno ≤ 99` (하드) — 회수 한계 **99,000건**
+`displaylines=1` 로 크기 영향을 제거한 대조에서 98✅ 99✅ **100❌ 101❌ 150❌**.
+→ 한 검색식 최대 = 99 × 1000 = **99,000건**. 국립중앙도서관의 500건과 비교해 **198배**라
+   대부분의 검색식은 분할이 필요 없다(자매 프로젝트의 재귀 분할 기계가 여기선 과잉).
+
+### (E) 🔴 `ERR04` 는 종료가 아니라 **재시도 대상**이다
+깊은 오프셋에서 간헐 발생하며 **단조롭지 않다**(dl=1000: p30❌ p40✅ p50✅ p60❌,
+같은 요청 3회 중 1회만 실패). 종료 조건으로 쓰면 **수집이 임의 지점에서 조용히 잘린다**.
+반면 22(쿼터)·30(키)·31(만료)는 재시도 무의미 → `parser.TERMINAL_CODES` 로 분리.
+
+### (F) 레코드는 **고정 스키마가 아니다**
+`<item><name>·<value></item>` 쌍이고 `name` 집합이 자료종마다 다르다(기사=기사명·수록지명,
+도서=자료명·청구기호·ISBN, 학위논문=논문명·학위년도…). → `NAME_MAP` 으로 알려진 이름만
+매핑하고 **나머지는 전부 `raw` 에 보존**한다. ⚠️ 문서 예시의 `DB` 항목은 실응답 100건에 없었다.
+
+### (F-2) 🔴 검색 결과에 하이라이트 마크업이 섞인다 (문서에 언급 없음)
+검색 서비스는 **매칭된 필드**에 `<font color="red">…</font>` 를 넣는다(`/basic`·`/detail` 둘 다).
+상세정보조회에는 없다(검색이 아니므로). `models.clean_html()` 로 제거하고 `raw` 에 원문 보존.
+⚠️ **공백은 접지 않는다** — `키워드` 가 여러 칸 공백을 구분자로 쓴다. NL 은 토큰마다 span 이라
+   공백 정규화가 필요했지만 여기는 필드 전체를 한 번 감싼다. **사실을 이식하지 말 것.**
+⚠️ 교훈: 초기 탐침이 제목 매칭 검색어만 써서 놓쳤다 — **매칭 필드를 바꿔가며** 확인할 것.
+
+### (F-3) 🔴 dbname × 검색항목: 문서 목록을 그대로 쓰면 안 된다 (전수 실측)
+문서의 이름 중 **거부되는 것이 많고**(발행년도·학위구분·DDC분류·별치기호·처리상태·위원회 …
+전부 표시/필터 전용), **문서에 없는데 되는 것**도 있다(학위논문 `지도교수`).
+슬래시 이름은 한 덩어리(`수록지명/신문명`·`CIS/UNSA`). `지식공유` 는 전체항목조차 ERR04.
+→ `config.DB_CATEGORIES` 는 **실측값**이다. 문서로 되돌리지 말 것.
+⚠️ 측정할 때 **ERR04 재시도 필수** — 1회만 태우면 간헐 오류가 '거부'로 기록된다
+   (`세미나자료/전체항목` 이 실제로 그렇게 오판됐다).
+
+### (F-4) 🔴 `requests.text` 금지 — charset 없는 헤더 + chardet = 조용한 문자 깨짐
+`Content-Type: application/xml` 에 charset 이 없어 requests 가 chardet 로 추측한다.
+`dbname=고서` 응답이 **ptcp154 로 추측돼 한글이 통째로 깨졌다**. 일반도서가 멀쩡했던 건 우연.
+→ `_call` 은 **bytes** 를 돌려주고 ElementTree 가 XML 선언을 존중한다. 회귀로 고정.
+
+### (G) 트래픽
+개발계정 **10,000건/일** · 30 tps · 평균 500ms · 갱신 일 1회. 탐침 스크립트도 throttle 을 건다.
+
+## 7. 개발 원칙 (자매 프로젝트 공통 — 이미 값을 치른 것들)
+- 자격증명은 `.env`/MCP env 블록으로만. **`raise_for_status()` 금지** — 인증키가 든 URL 을 예외에 박는다.
+- 파서 봉투에서 **자격증명형 키 제거**(`key`·`serviceKey`·`token`…) — `status` 가 봉투를 그대로 싣는다.
+- **조용한 절단 금지** — `total`·`truncated`·`cap_hit` 을 메타로 노출. `truncated`(max_records 상향으로 해결)와
+  `cap_hit`(API 상한, 상향해도 해결 안 됨)은 **분리**한다. 처방이 다르기 때문이다.
+- 출력 경로 이탈 차단(`safe_name`) — `name="../x"` 가 out_dir 밖에 쓰이던 결함이 세 저장소에 다 있었다.
+- MCP 경계에서는 조용하게(`@_safe` 가 예외를 dict 로), 파서 내부는 시끄럽게(빈 결과 통과 금지).
+- 전송 기본값은 **stdio 로 못박는다** — 바뀌면 기존 등록이 전부 죽는다. 회귀 테스트로 고정.
+- `__version__` 은 `importlib.metadata` 조회. `use_os_trust()` 는 **코드**에서 호출(등록 명령줄 ✗).
+- 정중한 호출: throttle, 지수 백오프, 페이지네이션 안전장치(새 레코드 0이면 종료).
+- 원본 응답 필드는 `raw` 로 보존. **커밋 메시지 한국어, Claude 서명 금지.**
+- **라이브 검증 우선(추정 금지)** — 필드명·값은 실응답을 떠서 확정하고 문서에 검증 등급(✅📄❓)을 표기한다.
+  ⚠️ **이름 대칭 가정 금지**(NL: `kdcName1s` 는 동작, `kdcCode1s` 는 무시).
+  ⚠️ **미지원 값이 조용히 폴백하는지 대조군으로 확인**(NL: 저자명을 ISBN 필드에 넣었더니 0건이 아니라 전 필드 결과).
+
+## 8. 상태 (2026-09-07)
+- ✅ **v0.1.0 코어 완성** — config·models·parser·client·exporters·server·cli + 회귀 **57건 통과**.
+  라이브 검증 완료: `na status` 왕복 정상, `na search`·`na collect`(합집합 844건 → xlsx/csv/json) 동작,
+  MCP 도구 4종(`na_status`·`na_search`·`na_collect`·`na_fields`) 등록 확인.
+- 🔬 **문서와 실제의 불일치 5종을 실측으로 잡았다**(§6-A). 특히 `<recode>` 는 문서대로
+  만들었으면 **전건 0개를 회수하면서 total 은 정상으로 보고**했을 것이다 — 이 저장소가
+  막겠다고 한 실패 양식 그대로다. 회귀 테스트로 고정했다.
+- 🔴 **자체 결함 2종을 라이브 실행이 잡았다**(단위 테스트는 못 잡는 층):
+  ① `max_records` 가 **검색어 전체에 걸친 예산**이라 앞 검색어가 다 쓰면 뒤 검색어가
+     **아예 조회되지 않는데 경고가 없었다**("검색어 3개"라고 출력하며 실제로는 1개만 조회).
+     → `terms_searched`·`terms_unsearched`·`stopped_early_note` 추가.
+  ② 마지막 페이지 다음 페이지를 부르고 그 빈 응답을 오류로 올려 **검색어마다 재시도 3회씩
+     쿼터를 태웠다**. → `expect_records`(첫 페이지만 엄격) + `total` 도달 시 조기 종료.
+- ✅ **`/detail`(상세검색) 라이브 검증 완료** — dbname 별 검색항목 어휘가 **강제**된다.
+  통합검색과 **정반대**다(§6-B): 틀린 항목이 통합검색에서는 전체 카탈로그를 주고,
+  상세검색에서는 ERR04 로 실패한다. `DB_CATEGORIES` 21종을 넣어 호출 전에 막는다.
+  `option` 은 선택이 맞고(문서 상충 해소) **유일한 서버측 연도 필터**다(166건 → 8건 실측).
+- ✅ **`detailinfoservice`(상세정보·목차) 추가 — 라이브 검증 완료.** 활용신청 승인됨.
+  인증키는 계정 단위라 자료검색과 **같은 키가 그대로** 통한다.
+  🔴 봉투가 검색과 달라 별도 파서가 필요했다 — `<item>` 이 최상위에 평탄하게 오고,
+     `/toc` 는 `<toc>` 가 `<header>` **앞**에 온다. 목차 본문은 HTML 이스케이프 상태다.
+  🔴 **없는 제어번호도 ERR04** — 일시 오류 코드와 같아 구분 불가. 단건 조회는 재시도 2회로 줄였다.
+  회귀 71 → **79건**.
+- 🔴 **사용자 검증에서 결함 1종이 더 나왔다(2026-09-07)** — 저자명 검색 결과에
+  `<font color="red">양연동</font>` 마크업이 그대로 실려 정규화 필드·내보내기까지 흘렀다.
+  초기 탐침이 `전체,교육` 처럼 **제목에 매칭되는 검색어만** 써서 못 봤다.
+  `clean_html()` 추가 + 회귀 5건(79 → **84**). 교훈: 매칭 **필드를 바꿔가며** 실측할 것.
+- 🔬 **사용자 검증 요청이 결함 3종을 더 냈다 (2026-09-07, 회귀 84 → 90)**
+  ① **하이라이트 마크업**(§F-2) — 저자명 검색 결과에 `<font color="red">` 가 그대로 실렸다.
+  ② **화이트리스트가 문서 기준이라 틀렸다**(§F-3) — 문서에만 있는 `지도교수(2009~)` 를 통과시키고,
+     실제로 동작하는 `지도교수` 를 막고 있었다. 전수 실측으로 교체.
+  ③ **인코딩**(§F-4) — `resp.text` 가 chardet 추측에 의존해 `고서` 자료종의 한글이 통째로 깨졌다.
+  → 셋 다 **탐침을 다양화해야 보이는** 것이었다. `probe_markup`·`probe_categories` 추가.
+  🔴 특히 ②·③ 은 **내가 문서에 적어둔 사실을 내 코드가 안 지킨** 사례다
+     (ERR04 재시도 필요를 적고도 탐침에 안 넣음).
+- ✅ 자료종 12종 필드 census 완료 — 표제 필드가 DB마다 다르다는 것을 `NAME_MAP` 에 반영
+  (학술지·신문 `수록지명/신문명`, 전자저널 `저널명` 등). 이전엔 제목이 빈 채로 나왔다.
+- ⏭️ 다음: ① `na_collect` 에 상세정보·목차 보강 옵션(제어번호별 후속 조회) 검토 —
+     쿼터(10,000/일)를 크게 쓰므로 기본 off 로 둘 것
+  → ② GitHub 공개(`rubatoyd/na-openapi-mcp`) + CI/릴리스 워크플로 이식.

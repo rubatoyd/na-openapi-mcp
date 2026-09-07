@@ -1,0 +1,129 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="ko" xml:lang="ko">
+	<head>
+	<meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+	<title>국회도서관 OpenAPI 활용 가이드</title>
+	<link rel="stylesheet" type="text/css" href="./css2/common.css" />
+	</head>
+	<body>
+    	<div id="wrap">
+            <div id="hearder"><!--상단 시작-->
+				<div id="hearder_center">
+					<h1><a href="./index.html"><img src="img/common/heder_simbol.gif" alt="국회도서관"/></a></h1>
+					<h2 class="skip">주메뉴</h2>
+						<ul class="navi">
+							<li class="navi_01"><a href="./S1001.html"><span class="skip">OpenAPI개요</span></a></li>
+							<li class="navi_02"><a href="./S2001.html"><span class="skip">서비스소개</span></a></li>
+							<li class="navi_03"><a href="./S3001.html"><span class="skip">서비스명세</span></a></li>
+							<!--li class="navi_03"><a href="https://openapi.nanet.go.kr/nadl/S3004_01_01.jsp"><span class="skip">서비스명세</span></a></li-->
+							<li class="navi_04"><a href="./S4001.html"><span class="skip">참고정보</span></a></li>
+						</ul>
+				</div>
+            </div><!--상단 끝-->
+            <div id="container"><!--콘테이너 시작-->
+            
+            <div class="left"><!--콘텐츠 왼쪽 시작-->
+                 <div><!--왼쪽메뉴 시작-->
+                      <h3 class="skip">왼쪽메뉴</h3>
+                        <div class="left_menu_title bold">참고정보</div>
+                        <div class="left_menu">
+                            <ul>
+                                <li><a href="./S4001.html" class="left_menu_2sub menu_on">오류메시지</a></li>
+                                <!-- <li><a href="./S4002.html" class="left_menu_2sub">API 테스트 프로그램 다운로드</a></li> -->
+                                <!-- <li><a href="./S4003.html" class="left_menu_2sub">개발 Platform</a></li> -->
+                            </ul>
+                        </div>
+                        <div class="left_menu_bottom"></div>
+                    </div><!--왼쪽메뉴 --> 
+                </div><!--콘텐츠 왼쪽 끝-->
+	
+                <div class="right"><!--오른쪽 시작-->
+                	<h1 class="sub_title_01"><span></span>오류 메시지</h1>
+                    <div class="table_D_zone"><!--테이블 A존 시작 -->
+                         <table class="table_03" summary="항목명, 항목크기, 구분, 샘플데이터, 항목설명을 보여주는 표입니다." >
+                                <colgroup>
+                                    <col style="width: 15%;">
+                                    <col style="width: 30%;">
+                                    <col style="width: 45%;">
+                                </colgroup>
+                                    <thead>
+                                        <tr>
+                                            <td>오류번호</td>
+											<td >메시지</td>
+                                            <td class="bor_none">내용</td>
+                                           </tr >
+                                    </thead>
+                                    <tfoot></tfoot>
+                                    <tbody>
+                                         <tr>
+                                           <td>01</td>
+                                           <td>APPLICATION ERROR.<br /></td>
+                                           <td class="bor_none"><span class="bor_none ">어플리케이션 에러</span></td>
+                                         </tr>
+                                         <tr>
+                                           <td>04</td>
+                                           <td>HTTP ERROR.</td>
+                                           <td class="bor_none"><span class="bor_none ">HTTP 에러</span></td>
+                                         </tr>
+                                         <tr>
+                                          <td>10</td>
+                                          <td>INVALID_REQUEST_PARAMETER_ERROR.</td>
+                                          <td class="bor_none ">잘못된 요청 파라메터 에러입니다.</td>
+                                        </tr>
+                                        <tr>
+                                          <td>11</td>
+                                          <td>NO MANDATORY REQUEST PARAMETERS ERROR.</td>
+                                          <td class="bor_none"><span class="bor_none ">필수요청 파라메터가 없습니다.</span></td>
+                                        </tr>
+                                         <tr>
+                                           <td>12</td>
+                                           <td>NO OPENAPI SERVICE ERROR.</td>
+                                           <td class="bor_none "><span class="bor_none">해당 OpenAPI 서비스가 없거나 폐기됨</span></td>
+                                         </tr>
+                                         <tr>
+                                           <td>20</td>
+                                           <td>SERVICE ACCESS DENIED ERROR.</td>
+                                           <td class="bor_none "><span class="bor_none">서비스 접근거부</span></td>
+                                         </tr>
+                                         <tr>
+                                           <td>22</td>
+                                           <td>LIMITED NUMBER OF SERVICE REQUESTS EXCEEDS ERROR.</td>
+                                           <td class="bor_none"><span class="bor_none ">서비스 요청제한횟수 초과에러(일별 요청한도 등)<br />
+                                           <br />
+                                           </span></td>
+                                         </tr>
+                                         <tr>
+                                           <td>30</td>
+                                           <td>SERVICE KEY IS NOT REGISTERED ERROR.</td>
+                                           <td class="bor_none "><span class="bor_none">등록되지 않은 서비스키</span></td>
+                                         </tr>
+                                         <tr>
+                                           <td>31</td>
+                                           <td>DEADLINE HAS EXPIRED ERROR.</td>
+                                           <td class="bor_none"><span class="bor_none ">기한 만료된 서비스키<br />
+                                           </span></td>
+                                         </tr>
+                                         <tr>
+                                           <td>32</td>
+                                           <td>UNREGISTERED IP ERROR.</td>
+                                           <td class="bor_none"><span class="bor_none ">등록되지 않은 IP주소</span></td>
+                                         </tr>
+                                         <tr>
+                                           <td>99</td>
+                                           <td>UNKNOWN ERROR.</td>
+                                           <td class="bor_none ">기타 에러</td>
+                                         </tr>
+                                         
+                                    </tbody>
+                                </table> 
+                    </div><!--테이블 A존 끝-->
+                    <br /><br />  
+              </div><!--오른쪽 끝-->
+             </div><!--콘테이너 끝-->
+
+            <div id="footer"><!--풋터 시작-->
+            	<address class="address"><em>국회도서관 전자정보정책과 | </em> 서울 영등포구 의사당대로 1 / 신청·승인 02-6788-4120, 제공·오류 02-6788-4150 / nadlinfo@nanet.go.kr</address>
+            </div><!--풋터 끝-->
+        </div>
+	</body>
+</html>

@@ -1,0 +1,35 @@
+# 자격증명
+.env
+.env.*
+!.env.example
+
+# Claude Code 로컬 설정 (NA_API_KEY 등 비밀 포함 가능)
+.claude/settings.local.json
+
+# 수집 산출물
+output/
+na-output/
+
+# Python / uv
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 빌드 산출물
+*.mcpb
+bundle/
+
+# 탐침 산출물 (응답 원문에 인증키가 에코될 수 있다)
+probe-out/
+# 조사용 중간 산출물 (워크플로 에이전트가 루트에 흘리는 것들)
+survey_*.json
+
+# OS / 에디터
+.DS_Store
+Thumbs.db

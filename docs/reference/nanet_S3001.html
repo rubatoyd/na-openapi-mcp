@@ -1,0 +1,204 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="ko" xml:lang="ko">
+	<head>
+	<meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+	<title>국회도서관 OpenAPI 활용 가이드</title>
+	<link rel="stylesheet" type="text/css" href="./css2/common.css" />
+	</head>
+	<body>
+    	<div id="wrap">
+            <div id="hearder"><!--상단 시작-->
+				<div id="hearder_center">
+					<h1><a href="./index.html"><img src="img/common/heder_simbol.gif" alt="국회도서관"/></a></h1>
+					<h2 class="skip">주메뉴</h2>
+						<ul class="navi">
+							<li class="navi_01"><a href="./S1001.html"><span class="skip">OpenAPI개요</span></a></li>
+							<li class="navi_02"><a href="./S2001.html"><span class="skip">서비스소개</span></a></li>
+							<li class="navi_03"><a href="./S3001.html"><span class="skip">서비스명세</span></a></li>
+							<!--li class="navi_03"><a href="https://openapi.nanet.go.kr/nadl/S3004_01_01.jsp"><span class="skip">서비스명세</span></a></li-->
+							<li class="navi_04"><a href="./S4001.html"><span class="skip">참고정보</span></a></li>
+						</ul>
+				</div>
+            </div><!--상단 끝-->
+            <div id="container"><!--콘테이너 시작-->
+            
+            	<div class="left"><!--콘텐츠 왼쪽 시작-->
+                    <div><!--왼쪽메뉴 시작-->
+                        <h3 class="skip">왼쪽메뉴</h3>
+                        <div class="left_menu_title bold">서비스명세</div>
+                        <div class="left_menu">
+                            <ul>
+                                <li><a href="./S3001.html" class="left_menu_2sub menu_on">공지사항 조회</a></li>     
+								<!-- <li><a href="https://openapi.nanet.go.kr/nadl/S3004_01_01.jsp" class="left_menu_2sub">샘플테스트</a></li> -->
+                                <li><a href="./S3002_01_01.html" class="left_menu_2sub">자료검색 서비스</a></li>
+                                    <ul class="left_menu_3sub">
+                                        <li class="menu_on_sub"><a href="./S3002_01_01.html">통합검색 목록조회</a></li>
+                                        <li class="menu_on_sub"><a href="./S3002_02_01.html">상세검색 목록조회</a></li>
+                                        <li class="menu_on_sub"><a href="./S3002_03.html">DBNAME과 CATEGORY 명세</a></li>
+                                    </ul>
+                                <li><a href="./S3003_01_01.html" class="left_menu_4sub">상세정보조회 서비스</a></li>
+                                     <ul class="left_menu_3sub">
+                                        <li class="menu_on_sub"><a href="./S3003_01_01.html">상세정보 항목조회</a></li>
+                                        <li class="menu_on_sub"><a href="./S3003_02_01.html">목차정보 항목조회</a></li>
+                                    </ul>
+                            </ul>
+                        </div>
+                        <div class="left_menu_bottom"></div>
+                    </div><!--왼쪽메뉴 --> 
+                </div><!--콘텐츠 왼쪽 끝-->
+                
+                <div class="right"><!--오른쪽 시작-->
+                	<h1 class="sub_title_01"><span>공지사항 조회</span></h1>
+                    <span >가장 최근에 등록된 국회전자도서관 시스템 공지사항 5건을 조회하여 제공하는 서비스입니다.</span><br /><br />
+                    <div class="table_A_zone">
+						<span class="coll_address"><em class="bold">요청주소</em>: http://apis.data.go.kr/9720000/nadl/noticeservice</span><br /><br />
+						<span class="coll_address"><em class="bold">요청 메시지 명세</em>: 없음</span><br /><br />
+                        <span class="coll_address bold">응답 메시지 명세</span>
+                   </div>
+                   
+                    <div class="table_E_zone"><!--테이블 A존 시 -->
+                    <table class="table_04" summary="항목명, 항목크기, 구분, 샘플데이터, 항목설명을 보여주는 표입니다." >
+                            <colgroup>
+                                <col style="width: 15%;">
+                                <col style="width: 15%;">
+                                <col style="width: 10%;">
+                                <col style="width: 10%;">
+                                <col style="width: 20%;">
+                                <col style="width: 25%;">
+                            </colgroup>
+                                <thead>
+                                    <tr>
+                                        <td height="34">항목명(영문)</td>
+                                        <td>항목명</td>
+                                        <td>항목크기</td>
+                                        <td>항목구분</td>
+                                        <td>샘플데이터</td>
+                                        <td>항목설명</td>
+                                  </tr>
+                                </thead>
+                                <tfoot></tfoot>
+                                <tbody>
+                                    <tr>
+                                        <td class="back_color">channel</td>
+                                        <td class="back_color">&nbsp;</td>
+                                        <td class="back_color">&nbsp;</td>
+                                        <td class="back_color">&nbsp;</td>
+                                        <td class="back_color">&nbsp;</td>
+                                        <td class="back_color">&nbsp;</td>
+                                  </tr>
+                                     <tr>
+                                        <td class="pl20">title</td>
+                                        <td>채널제목</td>
+                                        <td>100</td>
+                                        <td>필수</td>
+                                        <td><span class="back_color">국회전자도서관<br />
+공지사항</span></td>
+                                        <td>&nbsp;</td>
+                                     </tr>
+                                    <tr>
+                                        <td class="back_color pl20"> description</td>
+                                        <td class="back_color">채널설명</td>
+                                        <td class="back_color">100</td>
+                                        <td class="back_color">필수</td>
+                                        <td class="back_color">국회전자도서관 <br />
+                                        공지사항 RSS서비스</td>
+                                        <td class="back_color">&nbsp;</td>
+                                  </tr>
+                                    <tr>
+                                      <td class="pl20">link</td>
+                                      <td>URL</td>
+                                      <td>50</td>
+                                      <td>필수</td>
+                                      <td>http://dl.nanet.go.kr</td>
+                                      <td>전자도서관시스템 접속 URL</td>
+                                    </tr>
+                                    <tr>
+                                      <td class="back_color pl20">item</td>
+                                      <td class="back_color">&nbsp;</td>
+                                      <td class="back_color">&nbsp;</td>
+                                      <td class="back_color">선택</td>
+                                      <td class="back_color">&nbsp;</td>
+                                      <td class="back_color">반복</td>
+                                    </tr>
+                                    <tr>
+                                      <td class="pl40">title</td>
+                                      <td>제목</td>
+                                      <td>255</td>
+                                      <td>필수</td>
+                                      <td></td>
+                                      <td>공지사항 제목</td>
+                                    </tr>
+                                    <tr>
+                                      <td class="back_color pl40">description</td>
+                                      <td class="back_color">내용</td>
+                                      <td class="back_color">4000</td>
+                                      <td class="back_color">필수</td>
+                                      <td class="back_color">&nbsp;</td>
+                                      <td class="back_color">공지사항 내용</td>
+                                    </tr>
+                                    <tr>
+                                      <td class="text_left pl40">pubDate</td>
+                                      <td>작성일</td>
+                                      <td>30</td>
+                                      <td>필수</td>
+                                      <td>목, 7 7월 2022 09:00:00 +0900</td>
+                                      <td>RFC822 표준</td>
+                                    </tr>
+                                    <tr class="line_lest">
+                                        <td class="back_color pl40">guid</td>
+                                        <td class="back_color">URL</td>
+                                        <td class="back_color">255</td>
+                                        <td class="back_color">필수</td>
+                                        <td class="back_color">&nbsp;</td>
+                                        <td class="back_color">공지사항 웹 페이지 URL</td>
+                                  </tr>
+                                </tbody>
+                      </table><br /><br />   
+                </div><!--테이블 A존 끝-->
+                   
+                <div class="table_B_zone"><!--테이블 B존 시작-->
+                  <span class="coll_message bold">응답 메시지 형식</span><br />
+                  <div class="coll_form01">
+                    <textarea class="coll_area01">
+<rss version="2.0">
+  <channel>
+    <title>국회전자도서관 공지사항</title>
+    <link>http://www.nanet.go.kr</link>
+    <description>국회전자도서관 공지사항 RSS서비스</description>
+    <item>
+      <title>국회도서관 이용시간 변경 안내</title>
+      <guid>https://dl.nanet.go.kr/notice/nadlDetail.do?bulletinNo=82</guid>
+      <pubDate>목, 7 7월 2022 09:00:00 +0900</pubDate>
+      <description><p style="text-align:center"><span style="font-size:20px"><span style="color:#000000">국회도서관 이용시간 변경 안내</span></span></p><p><br /><br /><span style="font-size:16px">국회도서관 이용 시간을 7.18.(월)부터 다음과 같이 변경하여 운영하오니 도서관 이용에 참고하시기 바랍니다<span style="font-family:돋움체">.</span><br /><br />● 국회도서관 이용시간<br /><span style="color:#000000">- 평일: </span><span style="color:#c0392b"><strong>오전 9시 ~ 오후 9시</strong></span><br /><span style="color:#000000">- 주말: </span><strong><span style="color:#c0392b">오전 9시 ~ 오후 5시</span></strong><br /><br />※ 휴관일 안내<br /><span style="font-family:돋움체">- </span>매월 둘째<span style="font-family:돋움체">/ </span>넷째주 토요일<br /><span style="font-family:돋움체">- </span>일요일을 제외한 공휴일<span style="font-family:돋움체">(</span>단<span style="font-family:돋움체">, </span>공휴일과 겹친 토요일<span style="font-family:돋움체">, </span>일요일은 휴관함<span style="font-family:돋움체">)</span><br /><br />● 「야간이용신청」 안내<br /><span style="font-family:돋움체">- </span>서고 자료와 야간 운영을 하지 않는 자료실의 자료는 국회전자도서관에서<br />「야간이용신청」을 한 후<span style="font-family:돋움체">, </span>야간에도 대출받아 이용할 수 있습니다<span style="font-family:돋움체">.</span><br /><br />◾ 야간 이용 시간<span style="font-family:돋움체">: </span>18:00~21:00<span style="font-family:돋움체"> (</span>월 <span style="font-family:돋움체">~ </span>금<span style="font-family:돋움체">)</span><br />◾「야간이용」신청 시간<span style="font-family:돋움체">: </span>이용 당일 09:00 ~ 17:00<span style="font-family:돋움체"> </span><span style="font-family:돋움체">(</span>월 <span style="font-family:돋움체">~ </span>금<span style="font-family:돋움체">)</span><br />◾ 신청 대상 자료<span style="font-family:돋움체">: </span>서고 소장 자료<span style="font-family:돋움체">, </span>인문<span style="font-family:돋움체">&middot;</span>자연과학자료실 소장 자료<span style="font-family:돋움체">, </span>참고도서<span style="font-family:돋움체">, </span>독도<span style="font-family:돋움체">&middot;</span>통일자료 <span style="font-family:돋움체">(</span>특수자료 제외<span style="font-family:돋움체">) </span>등<br />◾ 신청 방법<span style="font-family:돋움체">: </span>국회전자도서관에서 자료검색 &rarr; 야간이용신청 목록담기 &rarr; 야간이용 신청하기<br /><br />● 문의<br /><span style="font-family:돋움체">- </span>도서관 출입 문의<span style="font-family:돋움체">: </span>안내실<span style="font-family:돋움체">(02-6788-4178)</span><br /><span style="font-family:돋움체">- </span>도서관 이용 문의<span style="font-family:돋움체">: </span>대출대<span style="font-family:돋움체">(02-6788-4181~2, 4230)</span></span></p><p> </p></description>
+    </item>
+    <item>
+      <title>국회도서관 이용시간 변경 안내</title>
+      <guid>https://dl.nanet.go.kr/notice/nadlDetail.do?bulletinNo=81</guid>
+      <pubDate>금, 13 5월 2022 09:00:00 +0900</pubDate>
+      <description><div style="text-align:center"><strong>국회도서관 이용시간 변경 안내</strong></div><div><br />국회도서관 이용 시간을 다음과 같이 변경하여 운영하오니 도서관 이용에 참고하시기 바랍니다.<br /><br />● 국회도서관 이용 시간<br />- <span style="color:#c0392b">월요일 ~ 일요일 9:00 ~17:00 (휴관일 제외)</span><br />※ 휴관일 안내<br />- 매월 둘째/ 넷째주 토요일, 일요일을 제외한 공휴일<br /><br />● 주말 운영 안내<br />- 주말 운영 자료실: 대출대, 자유열람실, 어린이방, 사회과학자료실, 인문자연과학자료실, 법률정보센터, 정기간행물실,<br />디지털정보센터&middot;독도통일자료실<br /><br />● 문의<br />- 도서관 출입 문의: 안내실(02-6788-4178)<br />- 도서관 이용 문의: 대출대(02-6788-4181~2, 4230)</div></description>
+    </item>
+    <item>
+      <title>★NEW 구독형 전자책 서비스 이용 안내 (서울 본관)</title>
+      <guid>https://dl.nanet.go.kr/notice/nadlDetail.do?bulletinNo=80</guid>
+      <pubDate>금, 29 4월 2022 09:00:00 +0900</pubDate>
+      <description><span style="font-family:함초롬바탕"><span style="font-size:16px">2022년 5월부터 국회도서관 내/외부에서 이용할 수 있는 구독형 전자책 서비스를 시작합니다.<br /><br />이용대상:<br />- 국회직원(당직자, 출입기자, 공무직 근로자 등 국회 상주 근무자 포함)<br />- 이용자(장기열람증 소지자에 한함)</span><br /><span style="font-size:14px">※ 이용문의: 디지털정보센터(☎02-6788-4126)</span><br /><br /><span style="font-size:16px">이용방법:<br />- 회원 로그인 후 이용이 가능합니다.(직원은 개인식별번호로 로그인)<br />- 모바일 이용 시 [교보문고 전자도서관] 어플리케이션 다운로드 > 하단의 [도서관 검색] 클릭 > [국회도서관(구독형)] 검색</span><br /><br /><span style="font-size:14px">* 5/6월은 서비스 시범 운영 기간으로, 추후 서비스 내용이 달라질 수 있습니다.</span><br /><br /><span style="font-size:16px">많은 이용 부탁드립니다.<br /><br />구독형 전자책 서비스 바로가기>><br /><a href="http://nanet.dkyobobook.co.kr">https://nanet.dkyobobook.co.kr</a></span></span><br /> </description>
+    </item>
+    <item>
+      <title>오픈액세스 Web-DB 및 전자저널 이용안내</title>
+      <guid>https://dl.nanet.go.kr/notice/nadlDetail.do?bulletinNo=73</guid>
+      <pubDate>목, 18 3월 2021 09:00:00 +0900</pubDate>
+      <description><p><span style="font-size:10pt"><span style="font-family:'맑은 고딕'"><span style="font-size:16px">국회도서관에서는 장소와 시간의 제약 없이 자유롭게 이용 가능한 오픈액세스 웹DB 및 전자저널을 수집하여 서비스하고 있습니다.<br /><br /><br /><strong>1. 오픈액세스 Web-DB</strong></span><br /><br /><span style="font-size:14px">※ </span><span style="font-size:9.0pt"><span style="font-size:14px">아래 배너를 클릭하시면, 오픈액세스 Web-DB를 이용하실 수 있습니다.</span><br /><br /><a href="https://www.nanet.go.kr/datasearch/webdb/selectOuterUseYnDBList.do"><img alt="" height="65" width="100%" src="/upload/userfiles/images/20220304102642243.png" /></a><br /></span><span style="font-size:9.0pt">​</span></span></span></p><p><span style="font-size:16px"><span style="font-family:'맑은 고딕'"><strong>2. </strong><strong>오픈액세스 전자저널</strong></span><br /><br /><span style="font-family:'맑은 고딕'">도서관에서 구독중인 서양 학술저널 중 도서관 밖 어디서든지 자유롭게 열람이 가능한 저널을 모아 소개합니다.<br />오픈액세스 기사가 60% 이상인 저널들을 모아 안내해 드리니, 많은 이용 바랍니다.</span></span><br /> </p><span style="font-size:16px">1. <span style="font-family:'맑은 고딕'"><a href="https://link.springer.com/journal/10519/volumes-and-issues">Behavior genetics</a><br />2. <a href="https://onlinelibrary.wiley.com/loi/14677660/year/2022">Development and change</a><br />3. <a href="https://link.springer.com/journal/10640/volumes-and-issues">Environmental & resource economics</a><br />4. <a href="https://ejpr.onlinelibrary.wiley.com/loi/14756765">European journal of political research</a><br />5. <a href="https://academic.oup.com/esr/issue">European sociological review</a><br />6. <a href="https://journals.sagepub.com/loi/eura">European urban and regional studies</a><br />7. <a href="https://onlinelibrary.wiley.com/loi/14755890">Fiscal studies</a><br />8. <a href="https://onlinelibrary.wiley.com/loi/14680432">Gender, work and organization</a><br />9. <a href="https://onlinelibrary.wiley.com/loi/14779552">Journal of agricultural economics</a><br />10. <a href="https://www.tandfonline.com/loi/ulsc20">Leisure sciences</a><br />11. <a href="https://onlinelibrary.wiley.com/loi/17284457">Population and development review</a><br />12. <a href="https://onlinelibrary.wiley.com/loi/17485991/year/2021">Regulation & governance</a><br />13. <a href="https://onlinelibrary.wiley.com/loi/14679515/year/2021">Social policy & administration</a><br />14. <a href="https://www.wipo.int/wipo_magazine/en/list.jsp">WIPO magazine</a><br />15. <a href="https://www.imf.org/en/Publications/WEO/Issues/2022/01/25/world-economic-outlook-update-january-2022">World economic outlook</a></span></span><br /><br /><span style="font-size:14px"><span style="font-family:'맑은 고딕'">※ 저널명을 클릭하시면, 해당 저널의 아티클 원문을 이용하실 수 있습니다.</span></span><br />각 저널에 대한 설명은 첨부된 파일을 참고하시기 바랍니다.</description>
+    </item>
+  </channel>
+</rss>
+                      </response></textarea>                                 
+                  </div><!--테이블 B존 끝-->
+                </div><!--오른쪽 끝-->
+             </div><!--콘테이너 끝-->
+            
+            <div id="footer"><!--풋터 시작-->
+            	<address class="address"><em>국회도서관 전자정보정책과 | </em> 서울 영등포구 의사당대로 1 / 신청·승인 02-6788-4120, 제공·오류 02-6788-4150 / nadlinfo@nanet.go.kr</address>
+            </div><!--풋터 끝-->
+        </div>
+	</body>
+</html>
