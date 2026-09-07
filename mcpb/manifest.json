@@ -1,0 +1,93 @@
+{
+  "manifest_version": "0.3",
+  "name": "na-openapi-mcp",
+  "display_name": "국회도서관 자료검색기 (na-openapi-mcp)",
+  "version": "0.1.0",
+  "description": "국회도서관 자료검색 OpenAPI 수집기 — 도서·학위논문·국내외 기사·국회회의록·의안정보 등 21종 DB 서지 검색. 문서와 다른 실제 API 동작(레코드 태그·검색항목 함정·회수 한계)을 라이브 실측으로 확정했습니다. xlsx/csv/json/sqlite 내보내기",
+  "author": {
+    "name": "Yeondong Yang",
+    "url": "https://github.com/rubatoyd/na-openapi-mcp"
+  },
+  "homepage": "https://github.com/rubatoyd/na-openapi-mcp",
+  "documentation": "https://github.com/rubatoyd/na-openapi-mcp#readme",
+  "license": "MIT",
+  "keywords": [
+    "nanet",
+    "national-assembly-library",
+    "korea",
+    "openapi",
+    "library",
+    "bibliography",
+    "legislation",
+    "metadata"
+  ],
+  "server": {
+    "type": "binary",
+    "entry_point": "uvx",
+    "mcp_config": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/rubatoyd/na-openapi-mcp",
+        "na-mcp"
+      ],
+      "env": {
+        "NA_API_KEY": "${user_config.api_key}",
+        "NA_OS_TRUST": "${user_config.os_trust}"
+      }
+    }
+  },
+  "user_config": {
+    "api_key": {
+      "type": "string",
+      "title": "국회도서관 인증키 (data.go.kr)",
+      "description": "공공데이터포털에서 '국회 국회도서관_자료검색 서비스' 활용신청 후 발급받은 인증키. Decoding(원문) 값을 넣으세요 — Encoding 값을 넣어도 코드가 변환해 씁니다.",
+      "sensitive": true,
+      "required": true,
+      "default": ""
+    },
+    "os_trust": {
+      "type": "string",
+      "title": "OS 신뢰저장소 TLS (교육망/사내망)",
+      "description": "교육망·사내망 SSL 인터셉션 환경이면 1(기본). 1=OS 신뢰저장소 사용, 0=비활성.",
+      "required": false,
+      "default": "1"
+    }
+  },
+  "tools": [
+    {
+      "name": "na_status",
+      "description": "연결 점검 — 인증키 보유 여부 + 자료검색 API 실제 왕복 1회"
+    },
+    {
+      "name": "na_search",
+      "description": "자료검색 — `검색항목,키워드` 형식. total·truncated·cap_hit(회수 한계 99×page_size) 동반 반환. ⚠️ 미지원 검색항목은 오류가 아니라 전체 카탈로그 1,300만 건을 돌려주므로 화이트리스트로 호출 전에 막는다. dbname 지정 시 상세검색으로 전환되며 검색항목 어휘가 DB마다 다르다"
+    },
+    {
+      "name": "na_collect",
+      "description": "검색어 합집합 수집 → xlsx/csv/json/sqlite. 이 API 의 `|` 는 AND 이므로 OR 은 이 도구가 만든다. cap_hit_terms·stopped_early_note·early_stop_note 로 전수가 아닌 이유를 지목한다"
+    },
+    {
+      "name": "na_detail",
+      "description": "제어번호 1건 상세정보. ⚠️ 실측상 검색 결과와 필드·값이 완전히 동일하다 — 이미 검색한 자료에는 부르지 말 것(쿼터 낭비). 제어번호만 알 때 쓴다"
+    },
+    {
+      "name": "na_toc",
+      "description": "제어번호 1건 목차. HTML 이스케이프를 풀고 계층 들여쓰기를 보존해 돌려준다. `목차정보없음` 센티널은 걸러낸다. E-BOOK·학술지·신문·국외기사·동영상자료는 목차가 전건 없어 호출이 무의미하다"
+    },
+    {
+      "name": "na_fields",
+      "description": "검색항목·dbname 유효값과 실측 근거 — 구조적 빈 필드, 안내문 값, 목차 없는 자료종, 초록유무 비율 등 자료종 census(표본 약 21,000건) 결과"
+    }
+  ],
+  "compatibility": {
+    "platforms": [
+      "win32",
+      "darwin",
+      "linux"
+    ],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  }
+}

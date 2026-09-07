@@ -1,0 +1,185 @@
+name: Publish to MCP Registry (.mcpb)
+
+# 버전 태그 푸시 시 한 워크플로에서 전부 처리:
+#   ① OS별 자체완결 바이너리(.mcpb) 빌드 → ② 경량 .mcpb 팩 + sha256 주입 →
+#   ③ GitHub Release 생성(모든 자산 첨부) → ④ 공식 MCP 레지스트리 발행(GitHub OIDC).
+# ⚠️ GITHUB_TOKEN 으로 만든 release 는 다른 워크플로의 `release: published` 를 트리거하지
+#    않는다(재귀 방지) → 바이너리 빌드를 별도 워크플로로 분리하지 않고 선행 job 으로 둔다.
+#
+# ⚠️ **액션 태그 정책이 저장소마다 다르다**(2026-09-07 실측 확인):
+#    · actions/* 는 이동 메이저 태그를 유지한다(checkout·setup-python·upload-artifact·
+#      setup-node v7, download-artifact v8) → 메이저만 쓴다.
+#    · astral-sh/setup-uv 는 **v8 부터 이동 태그를 내지 않는다** → 정확 고정(ci.yml 참조).
+#    한쪽 관행을 다른 쪽에 이식하면 액션 해석이 실패한다.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  guard:
+    name: 버전 일관성 확인
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: 태그 · pyproject · manifest · server.json 이 모두 같은지
+        # ⚠️ 자매 프로젝트에서 릴리스마다 버전이 어긋난 전례가 있다. 빌드 전에 막는다.
+        env:
+          TAG: ${{ github.ref_name }}   # 이벤트 값은 env 경유 — 스크립트 주입 차단
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, re, sys
+          tag = os.environ["TAG"].lstrip("v")
+          pv = re.search(r'^version = "([^"]+)"',
+                         pathlib.Path("pyproject.toml").read_text(encoding="utf-8"), re.M).group(1)
+          seen = {"tag": tag, "pyproject": pv}
+          for f in ("packaging/binary/manifest.json", "mcpb/manifest.json", "server.json"):
+              seen[f] = json.loads(pathlib.Path(f).read_text(encoding="utf-8"))["version"]
+          print(json.dumps(seen, indent=2, ensure_ascii=False))
+          if len(set(seen.values())) != 1:
+              print("::error::버전이 어긋난다 — 릴리스를 중단한다"); sys.exit(1)
+          # server.json 의 다운로드 URL 도 태그와 맞아야 자산을 못 찾는 일이 없다
+          sj = json.loads(pathlib.Path("server.json").read_text(encoding="utf-8"))
+          ident = sj["packages"][0]["identifier"]
+          if f"/v{tag}/" not in ident:
+              print(f"::error::server.json identifier 가 태그와 다르다: {ident}"); sys.exit(1)
+          print("버전 일관성 OK")
+          PY
+
+  binaries:
+    name: Build self-contained .mcpb (${{ matrix.asset }})
+    needs: guard
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: na-openapi-mcp-win-x64.mcpb
+          - os: macos-latest
+            asset: na-openapi-mcp-macos-arm64.mcpb
+          - os: ubuntu-latest
+            asset: na-openapi-mcp-linux-x64.mcpb
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read        # 빌드 job 은 읽기만 필요 — 기본 권한에 기대지 않는다
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          pip install .
+
+      - name: Assert mcp 1.x (fastmcp 존재)
+        # 상한 없는 `mcp>=1.2.0` 이 2.0 으로 해석되면 mcp.server.fastmcp 가 사라진다.
+        run: |
+          python -c "import mcp.server.fastmcp; print('mcp.server.fastmcp OK')"
+
+      - name: Build self-contained binary
+        # ⚠️ `--collect-all mcp` 는 mcp.cli 가 import 시점에 sys.exit 을 호출해 실패한다
+        #    → mcp.server 서브모듈만 수집하고 mcp.cli/typer 는 제외(자매 프로젝트 kci 처방).
+        run: |
+          pyinstaller --onefile --console --name na-mcp \
+            --collect-submodules mcp.server --collect-data mcp \
+            --collect-all pydantic --collect-all pydantic_core \
+            --collect-all truststore --collect-all certifi --collect-all openpyxl \
+            --collect-all dotenv --collect-all requests --collect-all anyio \
+            --collect-all na_mcp --exclude-module mcp.cli --exclude-module typer \
+            --hidden-import mcp.server.fastmcp \
+            packaging/binary/entry.py
+
+      - name: 바이너리 스모크 (Python·uv 없는 경로로 기동되는가)
+        # ⚠️ 빌드 성공 ≠ 기동 성공. 실제 stdio 핸드셰이크까지 확인한다.
+        #    인증키 없이 돌리므로 API 왕복은 하지 않는다.
+        run: |
+          BIN=$(ls dist/na-mcp* | head -1)
+          { printf '%s\n' \
+              '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+              '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+              '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+            sleep 5
+          } | "$BIN" > bsmoke.jsonl || true
+          cat bsmoke.jsonl
+          grep -q '"serverInfo"' bsmoke.jsonl \
+            || { echo "::error::바이너리가 기동하지 않는다"; exit 1; }
+          for t in na_status na_search na_collect na_detail na_toc na_fields; do
+            grep -q "\"$t\"" bsmoke.jsonl || { echo "::error::도구 $t 미노출"; exit 1; }
+          done
+          echo "binary handshake + tools 6종 OK"
+
+      - name: Stage bundle
+        run: |
+          mkdir -p bundle/server
+          cp packaging/binary/manifest.json bundle/manifest.json
+          cp dist/na-mcp* bundle/server/
+
+      - name: Pack .mcpb
+        run: npx -y @anthropic-ai/mcpb@latest pack bundle "${{ matrix.asset }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish:
+    name: Release + MCP Registry 발행
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # mcp-publisher github-oidc 인증
+      contents: write   # GitHub Release 생성/업로드
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: 경량 .mcpb 팩 (manifest 패키징)
+        run: npx -y @anthropic-ai/mcpb@latest pack mcpb na-openapi-mcp.mcpb
+
+      - name: OS별 바이너리 .mcpb 내려받기
+        uses: actions/download-artifact@v8
+        with:
+          path: binaries
+          merge-multiple: true
+
+      - name: 자산 확인
+        run: ls -la na-openapi-mcp.mcpb binaries/
+
+      - name: sha256 계산 → server.json 주입
+        run: |
+          SHA=$(sha256sum na-openapi-mcp.mcpb | cut -d' ' -f1)
+          echo "sha256=$SHA"
+          sed -i "s/__MCPB_SHA256__/$SHA/" server.json
+          grep -q "$SHA" server.json && echo "server.json 주입 확인"
+
+      - name: GitHub Release 생성 + 전체 자산 첨부
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}   # 이벤트 값은 env 경유 — 스크립트 주입 차단
+        run: |
+          gh release create "$TAG" \
+            na-openapi-mcp.mcpb binaries/*.mcpb \
+            --title "$TAG" \
+            --notes "국회도서관 자료검색 MCP $TAG — Claude Desktop .mcpb 번들 (경량 + OS별 자체완결)"
+
+      - name: mcp-publisher 설치
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+
+      - name: MCP 레지스트리 인증 (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: MCP 레지스트리 발행
+        run: ./mcp-publisher publish

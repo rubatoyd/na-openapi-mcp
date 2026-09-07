@@ -360,3 +360,47 @@ def test_na_fields_surfaces_census():
     assert out["서술형_본문_있는_자료종"] == {"국회의안정보": "제안이유 및 주요내용",
                                               "국회회의록": "내용"}
     assert "초록" in out["초록_경고"]
+
+
+# ── 릴리스 메타 일관성 (자매 프로젝트에서 릴리스마다 버전이 어긋난 전례) ──────
+# ⚠️ 릴리스 워크플로의 guard job 이 같은 검사를 하지만, **여기서도** 고정한다 —
+#    태그를 밀고 나서 실패를 알면 이미 늦다(GitHub Release 가 반쯤 만들어진다).
+
+def _release_versions():
+    import json
+    import re
+    root = pathlib.Path(__file__).parents[1]
+    pv = re.search(r'^version = "([^"]+)"',
+                   (root / "pyproject.toml").read_text(encoding="utf-8"), re.M).group(1)
+    out = {"pyproject.toml": pv}
+    for f in ("packaging/binary/manifest.json", "mcpb/manifest.json", "server.json"):
+        out[f] = json.loads((root / f).read_text(encoding="utf-8"))["version"]
+    return out
+
+
+def test_release_metadata_versions_agree():
+    seen = _release_versions()
+    assert len(set(seen.values())) == 1, f"버전 불일치: {seen}"
+
+
+def test_server_json_download_url_matches_version():
+    """identifier 의 태그가 version 과 다르면 레지스트리가 없는 자산을 가리킨다."""
+    import json
+    root = pathlib.Path(__file__).parents[1]
+    sj = json.loads((root / "server.json").read_text(encoding="utf-8"))
+    pkg = sj["packages"][0]
+    assert f"/v{pkg['version']}/" in pkg["identifier"], pkg["identifier"]
+    assert pkg["fileSha256"] == "__MCPB_SHA256__", \
+        "sha256 은 릴리스 시 주입된다 — 저장소에는 자리표시자로 남아야 한다"
+
+
+def test_mcpb_manifests_declare_every_tool():
+    """도구를 추가하고 manifest 를 안 고치면 번들 사용자에게는 안 보인다."""
+    import asyncio
+    import json
+    root = pathlib.Path(__file__).parents[1]
+    registered = {t.name for t in asyncio.run(s.mcp.list_tools())}
+    for f in ("packaging/binary/manifest.json", "mcpb/manifest.json"):
+        declared = {t["name"] for t in
+                    json.loads((root / f).read_text(encoding="utf-8"))["tools"]}
+        assert declared == registered, f"{f}: 선언 {declared} vs 등록 {registered}"
