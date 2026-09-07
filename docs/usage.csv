@@ -1,2 +1,2 @@
 date,views,view_uniques,clones,clone_uniques,release_downloads,releases,stars,forks,note
-2026-09-07,,,,,3,2,0,0,views:권한없음;clones:권한없음
+2026-09-07,,,,,3,2,0,0,"views:HTTP403(권한부족(fine-grained 는 Administration:Read, classic 은 repo 스코프 필요));clones:HTTP403(권한부족(fine-grained 는 Administration:Read, classic 은 repo 스코프 필요))"
