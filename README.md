@@ -1,15 +1,82 @@
 # na-openapi-mcp
 
-**국회도서관(National Assembly Library of Korea) OpenAPI** 검색·수집기 — MCP 서버 + CLI.
+<!-- mcp-name: io.github.rubatoyd/na-openapi-mcp -->
 
-자매 프로젝트 [nl-openapi-mcp](https://github.com/rubatoyd/nl-openapi-mcp)(국립중앙도서관) ·
-[kci-openapi-mcp](https://github.com/rubatoyd/KCI_openAPI)(KCI) ·
-[scienceON-mcp](https://github.com/rubatoyd/scienceON-mcp) 와 동일한 아키텍처를 쓴다.
+[![CI](https://github.com/rubatoyd/na-openapi-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/rubatoyd/na-openapi-mcp/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/rubatoyd/na-openapi-mcp)](https://github.com/rubatoyd/na-openapi-mcp/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/rubatoyd/na-openapi-mcp/total?label=downloads)](https://github.com/rubatoyd/na-openapi-mcp/releases)
 
-> 🚧 **개발 중** — 대상 API 의 파라미터·응답 스키마를 라이브 실측으로 확정하는 단계다.
-> 확정 전까지 도구 표면은 바뀔 수 있다.
+<!-- usage:start -->
+<!-- usage:end -->
 
-## 설치 · 등록
+**국회도서관(National Assembly Library of Korea) 자료검색** OpenAPI 를 Claude 등 MCP
+클라이언트에서 바로 쓰는 서버 + CLI. 도서·학위논문·국내외 기사·국회회의록·의안정보 등
+**21종 DB** 를 검색·수집하고 xlsx/csv/json/sqlite 로 내보냅니다.
+
+자매 프로젝트: [nl-openapi-mcp](https://github.com/rubatoyd/nl-openapi-mcp)(국립중앙도서관 단행본·회색문헌) ·
+[kci-openapi-mcp](https://github.com/rubatoyd/KCI_openAPI)(학술논문·인용지수) ·
+[scienceON-mcp](https://github.com/rubatoyd/scienceON-mcp)(KISTI 문헌)
+
+---
+
+## 이 도구가 특별히 신경 쓰는 것
+
+### ① 미지원 검색항목이 **오류 대신 전체 카탈로그**를 돌려줍니다
+
+이 API 최대의 함정입니다. 통합검색은 검색항목 이름을 모르면 **거부하지 않고 검색어를
+통째로 무시**합니다.
+
+```
+저자,오욱환      →  total=76          ← 정상
+저자명,오욱환    →  total=13,097,591  ← 전체 DB. 오류도 경고도 없다
+```
+
+`저자명` 은 **상세검색에서는 유효한 이름**이라 오타가 아니라 헷갈려서 쓰기 쉽습니다.
+그대로 두면 1,300만 건을 '검색 결과'로 오인하게 됩니다.
+→ 이 서버는 화이트리스트로 **호출 전에 거부**하고 올바른 이름을 알려줍니다.
+
+| 검색항목 | `오욱환` 검색 결과 |
+|---|---:|
+| `전체` · `기본검색` · `자료명` · `저자` · `키워드` | 105 · 88 · 4 · 76 · 7 |
+| `저자명` · `ISBN` · `발행년도` · 오타 | **각 13,097,591 (전체 DB)** |
+
+### ② 조용한 절단 방지
+
+받은 것이 전부인지, 잘린 것인지를 **항상 메타로 알려줍니다.**
+
+| 신호 | 뜻 | 처방 |
+|---|---|---|
+| `truncated` | `max_records` 에서 멈춤 | 올리면 해결 |
+| `cap_hit` | `total` > 회수 한계 — **API 가 더 안 줌** | 검색식을 쪼개야 함 |
+| `early_stop_note` | 새 레코드 0으로 조기 종료 | 중복 응답·서버 이상 가능 |
+| `stopped_early_note` | 예산 소진으로 **조회조차 못 한** 검색어 | `max_records` 상향 |
+| `zero_yield_warning` | 수락되지만 **항상 0건**인 검색항목 | 다른 항목 사용 |
+| `option_ignored_warning` | 연도 필터가 **무시됨**(통합검색) | `dbname` 함께 지정 |
+| `ignored_search_warning` | 전체 카탈로그 규모가 반환됨 | 검색항목 확인 |
+
+**회수 한계는 `pageno 최대 99 × page_size`** 입니다(실측). 기본값(1000)이면 99,000건이고,
+`page_size` 를 낮추면 한계도 함께 낮아집니다 — 이 서버는 그것까지 반영해 보고합니다.
+
+### ③ 공식 문서와 실제가 다른 곳을 실측으로 확정했습니다
+
+문서(.hwp/.docx)만 보고 만들면 **조용히 깨지는** 지점들입니다.
+
+| 항목 | 공식 문서 | ✅ 실제 |
+|---|---|---|
+| 레코드 태그 | `<record>` | **`<recode>`** — 문서대로면 전건 0개 회수 + `total` 은 정상 |
+| `<item>` 자식 순서 | value → name | **name → value** |
+| 제어번호 필드명 | `controlno` | **`제어번호`** |
+| `displaylines` 상한 | 100 | **1000** |
+| 인증키 | (언급 없음) | **Encoding 값을 URL 에 직접 결합**해야 함 |
+| 하이라이트 마크업 | (언급 없음) | 매칭 필드에 `<font color="red">` 삽입 |
+
+전체 대조표와 근거는 [`docs/NA_API_GUIDE.md`](docs/NA_API_GUIDE.md) 에 있습니다.
+
+---
+
+## 설치
+
+### 1) Claude Code / Claude Desktop (uvx — 권장)
 
 ```json
 {
@@ -18,20 +85,135 @@
       "type": "stdio",
       "command": "uvx",
       "args": ["--from", "git+https://github.com/rubatoyd/na-openapi-mcp", "na-mcp"],
-      "env": { "NA_API_KEY": "발급받은_Decoding_키" }
+      "env": { "NA_API_KEY": "발급받은_인증키" }
     }
   }
 }
 ```
 
+### 2) Claude Desktop `.mcpb` 원클릭
+
+[릴리스](https://github.com/rubatoyd/na-openapi-mcp/releases/latest)에서 내려받아 실행합니다.
+경량본(`na-openapi-mcp.mcpb`, uvx 경유)과 **Python·uv 없이 도는 자체완결본**
+(win-x64 · macos-arm64 · linux-x64)이 있습니다.
+
+### 3) 로컬 개발
+
+```bash
+git clone https://github.com/rubatoyd/na-openapi-mcp
+cd na-openapi-mcp
+uv sync --all-groups
+uv run pytest -q
+uv run na status
+```
+
+### 4) 다른 MCP 클라이언트
+
+stdio 전송이 기본입니다. HTTP 가 필요하면
+`na-mcp --transport streamable-http --host 127.0.0.1 --port 9126`
+(환경변수 `NA_MCP_TRANSPORT`·`NA_MCP_HOST`·`NA_MCP_PORT` 도 지원).
+
+---
+
 ## 인증키
 
-공공데이터포털 [data.go.kr](https://www.data.go.kr) 에서 국회도서관 API 활용신청 후 발급.
+공공데이터포털 [data.go.kr](https://www.data.go.kr) 에서 **국회 국회도서관_자료검색 서비스**
+(데이터셋 `15098174`) 활용신청 후 발급받습니다. 개발계정 트래픽은 **10,000건/일** 입니다.
 
-⚠️ data.go.kr 은 인증키를 **Encoding / Decoding 두 벌**로 준다.
-`NA_API_KEY` 에는 **Decoding(원문)** 을 넣는다 — 라이브러리가 인코딩하므로,
-Encoding 키를 넣으면 `%` 가 `%25` 로 이중 인코딩되어 **조용히 인증 실패**한다.
-Encoding 키만 있다면 `NA_API_KEY_ENCODED` 에 넣으면 코드가 변환해 쓴다.
+`na_detail`·`na_toc` 를 쓰려면 **상세정보조회 서비스**(`15098175`)도 함께 신청하세요 —
+인증키는 계정 단위라 같은 키가 그대로 통합니다.
+
+```bash
+NA_API_KEY=발급받은_키          # Decoding(원문) 권장
+NA_API_KEY_ENCODED=            # Encoding 값만 있으면 이쪽에
+NA_OS_TRUST=1                  # 교육망·사내망 SSL 인터셉션 대응(기본 1)
+```
+
+> 🔑 data.go.kr 은 인증키를 **Encoding / Decoding 두 벌**로 줍니다. 이 API 는 **Encoding
+> 값을 URL 에 직접 결합**해야 하는데(실측), 라이브러리의 `params=` 로 넘기면 `%2B` 가
+> `%252B` 로 이중 인코딩되어 **조용히 인증 실패**합니다. 어느 쪽을 넣든 코드가 알아서
+> 변환하므로 신경 쓰지 않아도 됩니다.
+
+---
+
+## MCP 도구
+
+| 도구 | 하는 일 |
+|---|---|
+| `na_status` | 인증키 보유 여부 + 실제 왕복 1회 |
+| `na_search` | 자료검색. 절단 신호를 함께 반환 |
+| `na_collect` | 검색어 **합집합** 수집 → xlsx/csv/json/sqlite |
+| `na_detail` | 제어번호 1건 상세정보 |
+| `na_toc` | 제어번호 1건 목차 |
+| `na_fields` | 검색항목·dbname 유효값 + 실측 근거(census) |
+
+### 검색어 형식
+
+**`검색항목,키워드`** 입니다. `|` 로 이으면 **AND** 로 묶입니다.
+
+```
+전체,교육불평등
+전체,교육|자료명,불평등          ← AND
+```
+
+OR(합집합)은 API 에 문법이 없어 `na_collect(terms=[…])` 가 만듭니다.
+
+**통합검색 검색항목(7종)**: `기본검색` `전체` `자료명` `저자` `발행자` `키워드` `청구기호`
+
+`dbname` 을 지정하면 **상세검색**으로 전환되며 검색항목 어휘가 DB마다 달라집니다
+(학위논문=`논문명`·`지도교수`, 국내기사=`기사명`, 학술지·신문=`수록지명/신문명` 한 덩어리).
+정확한 목록은 `na_fields` 로 확인하세요.
+
+---
+
+## CLI
+
+```bash
+na status
+na fields                          # 검색항목·dbname 유효값 (--json 으로 census 전체)
+na search "전체,교육불평등" --max-records 20
+na search "저자명,양연동" --dbname 학위논문
+na collect --terms "전체,교육불평등" "전체,교육격차" --max-records 2000
+na detail MONO12026000012887
+na toc    MONO12026000012887
+
+# 연도 범위는 상세검색의 option 으로만 걸립니다(통합검색에서는 무시됨)
+na search "자료명,교육" --dbname 일반도서 --option "발행년도,2000|발행년도,2010"
+```
+
+---
+
+## 응답 필드
+
+레코드는 **고정 스키마가 아닙니다.** `<item><name>·<value>` 쌍이고 이름 집합이
+자료종마다 다릅니다 — 표제 필드만 해도 `자료명`(도서) / `논문명`(학위논문) /
+`기사명`(기사) / `수록지명/신문명`(학술지·신문) / `저널명`(전자저널) / `안건`(회의록) /
+`의안명`(의안정보) / `번역법령명` / `표그림명` 으로 갈립니다.
+
+알려진 이름은 공통 컬럼으로 정규화하고 **원본은 `raw` 에 그대로 보존**합니다.
+
+주의할 값들(전부 실측):
+
+- **안내문이 값 자리에 옵니다** — E-BOOK 의 `DDC` 는 99.95% 가 `전자형태로만 열람 가능함`
+  입니다. 정규화 필드는 비우고 `placeholder_fields` 에 이름을 남깁니다(원문은 `raw` 에).
+- **연도가 4자리가 아닐 수 있습니다** — `201u`(MARC 불확정 연도), 빈값, `0`.
+- **`초록유무=Y` 여도 초록 본문을 받을 방법이 없습니다.** 서술형 텍스트는
+  국회의안정보(`제안이유 및 주요내용`)·국회회의록(`내용`)에만 있습니다.
+- **목차가 전건 없는 자료종**: E-BOOK · 학술지,잡지 · 신문 · 국외기사 · 동영상자료.
+
+---
+
+## 검증 상태
+
+- **회귀 테스트 170건.** CI 는 테스트뿐 아니라 **클라이언트가 실제로 띄울 수 있는지**를
+  봅니다 — 신규 의존성 해석에서 `mcp.server.fastmcp` 존재 확인, 실제 stdio 핸드셰이크,
+  도구 6종 노출, 무키 CLI 기동, 비밀 파일 미추적.
+- **API 사실은 전부 라이브 왕복으로 확정**했습니다(문서·자매 프로젝트에서 옮겨 적지 않음).
+  자료종 13종 필드 census 표본 약 21,000건. 재현: `scripts/probe_*.py`.
+- 상세 근거와 검증 등급(✅ 실측 / 📄 문서근거 / ❓ 미검증)은
+  [`docs/NA_API_GUIDE.md`](docs/NA_API_GUIDE.md) 에 있습니다.
+
+---
 
 ## 라이선스
 
