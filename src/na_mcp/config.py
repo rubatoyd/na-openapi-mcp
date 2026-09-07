@@ -153,11 +153,25 @@ PLACEHOLDER_VALUES = (
 
 
 def is_placeholder(value: str | None) -> bool:
-    """값이 데이터가 아니라 안내 문구인가 (공백 무시 비교)."""
+    """값이 데이터가 아니라 안내 문구인가 (공백 무시 비교).
+
+    ⚠️ **부분일치로 판정하면 안 된다.** 초판은 `ph in flat` 이라, 그 문구를 **포함한**
+       정상 자료명·키워드까지 통째로 비웠다(적대적 리뷰 지적). 예컨대
+       `해당사항없음 처리 실태 연구` 같은 표제가 빈 문자열이 된다.
+    → **값 전체가 안내문일 때만** 참으로 본다. 다만 실측상 짧은 별치기호 접두가 붙는다
+       (`EB 전자형태로만 열람 가능함`·`TM 해당 논문 없음`·`VM …`) — 그것만 허용한다.
+    """
     if not value:
         return False
     flat = "".join(str(value).split())
-    return any(ph in flat for ph in PLACEHOLDER_VALUES)
+    for ph in PLACEHOLDER_VALUES:
+        if flat == ph:
+            return True
+        if flat.endswith(ph):
+            prefix = flat[: -len(ph)]
+            if prefix.isalnum() and prefix.isupper() and len(prefix) <= 3:
+                return True     # 별치기호 접두(EB·ER·VM·TM·TD …)
+    return False
 
 
 # 🔴 `목차` 가 **상수 'N'** 인 자료종 — `na_toc` 호출이 통째로 무의미하다(쿼터만 쓴다).
@@ -220,6 +234,11 @@ def validate_search(search: str) -> str:
     """
     if not search or not search.strip():
         raise SearchFieldError("search 가 비었습니다 — `검색항목,키워드` 형식이어야 합니다.")
+    # 🔴 **정규화한 문자열을 돌려주고, 호출자는 그것을 전송해야 한다.**
+    #    초판은 검증할 때만 strip 하고 원문을 그대로 보냈다. 그 결과 ` 전체 ,교육` 이
+    #    검증을 통과한 뒤 서버에는 공백이 붙은 채 전달돼 **검색항목이 인식되지 않고
+    #    전체 카탈로그 13,097,591건**이 돌아왔다(적대적 리뷰가 라이브로 잡았다).
+    clauses: list[str] = []
     for clause in search.split("|"):
         clause = clause.strip()
         if not clause:
@@ -239,7 +258,18 @@ def validate_search(search: str) -> str:
                 f"⚠️ 이 API 는 미지원 검색항목을 오류로 알리지 않고 **검색어를 무시한 채 "
                 f"전체 카탈로그({FULL_CATALOG_TOTAL:,}건)를 반환**하므로 여기서 막습니다."
             )
-    return search
+        keyword = clause.split(",", 1)[1].strip()
+        if not keyword:
+            raise SearchFieldError(
+                f"검색어가 비었습니다: {clause!r} — `{field},키워드` 형태로 값을 주세요.")
+        clauses.append(f"{field},{keyword}")
+    if not clauses:
+        # 🔴 `search='|'` 처럼 **절이 전부 비면** 위 루프가 통째로 건너뛰어 통과했다.
+        #    그대로 전송하면 검색어 없는 질의가 되어 전체 카탈로그가 온다(적대적 리뷰 실측).
+        raise SearchFieldError(
+            f"유효한 검색절이 하나도 없습니다: {search!r} — `검색항목,키워드` 형식이어야 합니다. "
+            f"⚠️ 이대로 보내면 전체 카탈로그({FULL_CATALOG_TOTAL:,}건)가 반환됩니다.")
+    return "|".join(clauses)
 
 
 def validate_detail_search(dbname: str, search: str) -> str:
@@ -259,6 +289,12 @@ def validate_detail_search(dbname: str, search: str) -> str:
         raise SearchFieldError(
             f"'{dbname}' 은 실측상 **어떤 검색항목도 통하지 않습니다**(전체항목 포함). "
             f"dbname 자체가 무효로 보이므로 다른 DB를 쓰세요.")
+    if not search or not search.strip():
+        # 🔴 빈 search 검사가 없어 `dbname` 만 주면 ERR04 재시도를 태우고 원인을 오진했다.
+        raise SearchFieldError(
+            f"search 가 비었습니다 — `검색항목,키워드` 형식이어야 합니다. "
+            f"'{dbname}' 의 검색항목: {', '.join(allowed)}")
+    clauses: list[str] = []      # 정규화한 절만 모아 전송한다(validate_search 와 같은 이유)
     for clause in search.split("|"):
         clause = clause.strip()
         if not clause:
@@ -282,7 +318,15 @@ def validate_detail_search(dbname: str, search: str) -> str:
                 f"학술지·신문='수록지명/신문명' 한 덩어리). "
                 f"'{dbname}' 에서 가능: {', '.join(allowed)}"
             )
-    return search
+        keyword = clause.split(",", 1)[1].strip()
+        if not keyword:
+            raise SearchFieldError(
+                f"검색어가 비었습니다: {clause!r} — `{field},키워드` 형태로 값을 주세요.")
+        clauses.append(f"{field},{keyword}")
+    if not clauses:
+        raise SearchFieldError(
+            f"유효한 검색절이 하나도 없습니다: {search!r} — `검색항목,키워드` 형식이어야 합니다.")
+    return "|".join(clauses)
 
 
 # ── 인증키 ───────────────────────────────────────────────────────────────────

@@ -71,16 +71,25 @@ NAME_MAP: dict[str, str] = {
 
 _DIGITS = re.compile(r"\D")
 _WS = re.compile(r"\s+")
-_HTML_TAG = re.compile(r"<[^>]+>")
+# 🔴 **하이라이트 태그만** 지운다. 임의의 `<…>` 를 지우면 안 된다 —
+#    이 카탈로그의 **표제에 꺾쇠가 실제로 쓰인다**: `<표 124> 심폐소생술 교육 경험률`,
+#    `<그림 3> 추이`(표,그림DB 는 표제가 거의 전부 이 형태다). 초판이 `<[^>]+>` 로 싹 지워
+#    라이브 표본 1,000건 중 18건의 표제가 손상됐고, 도구 응답에는 raw 가 없어 복구도 불가능했다.
+#    → API 가 실제로 넣는 마크업(실측: `font`)과 흔한 강조 태그로 **화이트리스트**를 좁힌다.
+_HIGHLIGHT_TAG = re.compile(
+    r"</?\s*(?:font|span|b|strong|em|i|mark|u)(?=[\s/>])[^>]*>", re.IGNORECASE)
 
 
 def clean_html(text: str | None) -> str:
-    """검색 하이라이트 마크업 제거.
+    """검색 하이라이트 마크업만 제거. **데이터의 꺾쇠는 보존한다.**
 
     🔴 **검색 서비스(`/basic`·`/detail`)는 매칭된 필드에 `<font color="red">…</font>` 를
        끼워 보낸다**(✅ 실측). 지우지 않으면 제목·저자 비교, 중복제거, xlsx/csv 내보내기가
        전부 오염된다(저자명이 `<font color="red">양연동</font>` 로 저장된다).
        ⚠️ 상세정보조회(`detailinfoservice`)에는 하이라이트가 없다 — 검색이 아니기 때문이다.
+
+    🔴 **그러나 임의의 `<…>` 를 지우면 데이터가 깨진다.** 표,그림DB 의 표제는 거의 전부
+       `<표 124> …` 형태이고 일반도서에도 섞여 있다. 그래서 태그 이름을 화이트리스트로 막는다.
 
     ⚠️ **공백은 접지 않는다.** 이 API 의 `키워드` 는 여러 칸 공백을 **구분자로** 쓰므로
        (`주제어A   주제어B`) 공백을 접으면 경계가 사라진다. 자매 프로젝트(국립중앙도서관)는
@@ -89,7 +98,7 @@ def clean_html(text: str | None) -> str:
     """
     if text is None:
         return ""
-    return _HTML_TAG.sub("", str(text)).strip()
+    return _HIGHLIGHT_TAG.sub("", str(text)).strip()
 
 
 def normalize_pub_year(value: str | None) -> str:

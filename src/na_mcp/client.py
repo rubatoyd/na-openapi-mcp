@@ -135,20 +135,40 @@ class NaClient:
            **전체 카탈로그 1,300만 건**을 돌려주므로 조용히 넘기면 안 된다.
         """
         endpoint = SEARCH_DETAIL_URL if dbname else SEARCH_BASIC_URL
+        # 🔴 검증기가 돌려주는 **정규화된 문자열을 전송한다.** 반환값을 버리고 원문을 보내면
+        #    ` 전체 ,교육` 같은 입력이 검증만 통과하고 서버에서는 검색항목이 인식되지 않아
+        #    전체 카탈로그 1,300만 건이 온다(적대적 리뷰가 라이브로 잡은 결함).
         if dbname:
             # /detail 은 dbname 마다 검색항목 어휘가 다르다. 틀리면 ERR04 인데 그 코드는
             # 일시 오류이기도 해서 재시도를 낭비한다 → 호출 전에 막는다.
-            validate_detail_search(dbname, search)
+            search = validate_detail_search(dbname, search)
         else:
-            validate_search(search)
+            search = validate_search(search)
 
-        size = min(max(1, page_size or MAX_DISPLAYLINES), MAX_DISPLAYLINES)
         # ⚠️ 일부 자료종은 레코드가 무거워 500건 요청에서 ConnectionError 로 끊긴다(실측).
-        #    호출자가 명시하지 않았으면 안전한 값으로 낮춘다.
+        #    ⚠️ **호출자가 명시했으면 존중한다** — 초판은 명시값도 덮어써서 주석과 반대로 동작했다.
         cap = HEAVY_DBNAMES.get(dbname or "")
-        if cap and size > cap:
+        if page_size is None and cap:
             size = cap
+        else:
+            size = min(max(1, page_size or MAX_DISPLAYLINES), MAX_DISPLAYLINES)
         want = max(1, int(max_records))
+
+        # 🔴 회수 한계는 **99 × page_size** 다. 상수 99,000 으로 판정하면 page_size 를 낮췄을 때
+        #    실제로는 못 받는 구간을 '받을 수 있다'고 보고한다(예: size=200 이면 한계 19,800).
+        record_cap = PAGENO_MAX * size
+
+        # 🔴 `extra_params` 로 검증을 마친 파라미터를 덮어쓰면 화이트리스트가 무력해지고,
+        #    meta 는 **덮어쓰기 전 값**을 보고해 무엇을 요청했는지조차 알 수 없게 된다.
+        #    (적대적 리뷰 지적) → 예약 키는 아예 거부한다.
+        reserved = {"servicekey", "search", "pageno", "displaylines", "dbname", "option"}
+        if extra_params:
+            clash = sorted(k for k in extra_params if str(k).strip().lower() in reserved)
+            if clash:
+                raise NaError(
+                    f"extra_params 로 예약 파라미터를 덮어쓸 수 없습니다: {', '.join(clash)}. "
+                    f"검색항목 검증·페이징·인증을 무력화하고 meta 가 거짓을 보고하게 됩니다. "
+                    f"해당 값은 전용 인자(search·dbname·option·page_size)로 주세요.")
 
         records: list[Record] = []
         seen: set[str] = set()
@@ -169,7 +189,7 @@ class NaClient:
             if option:
                 params["option"] = option
             if extra_params:
-                params.update(extra_params)
+                params.update(extra_params)   # 예약 키는 위에서 이미 거부했다
 
             try:
                 total, page_recs, env = self._fetch_page(endpoint, params,
@@ -195,8 +215,15 @@ class NaClient:
                 if len(records) >= want:
                     break
             if not page_recs or new == 0:
+                # ⚠️ 조기 종료는 **조용하면 안 된다.** 아직 받을 게 남았는데(total 미달)
+                #    멈춘 것이라면 그 자체가 절단이다 — 중복 폭주·서버 이상 등이 원인일 수 있다.
+                if total and len(records) < min(total, want, record_cap):
+                    meta["early_stop_note"] = (
+                        f"페이지 {page} 에서 새 레코드가 0건이라 중단했습니다 — "
+                        f"total {total:,}건 중 {len(records):,}건만 회수했습니다. "
+                        f"전수가 아닙니다(중복 응답 또는 서버 이상 가능).")
                 break                      # 페이지네이션 안전장치(새 레코드 0이면 종료)
-            if total and len(records) >= min(total, API_RECORD_CAP):
+            if total and len(records) >= min(total, record_cap):
                 break                      # 다 받았다 — 끝을 지난 페이지를 부르지 않는다
                                            # (쿼터 낭비 + 빈 응답 재시도를 유발했다)
 
@@ -206,20 +233,32 @@ class NaClient:
         # ── 절단 사유 분리 ───────────────────────────────────────────────────
         # truncated: 더 받을 수 있는데 max_records 에서 멈춤 → 올리면 해결
         meta["truncated"] = total > len(records) and len(records) >= want
-        # cap_hit: API 구조상 더 못 받음(pageno<=99) → 올려도 해결 안 됨, 검색식을 쪼개야 함
-        meta["cap_hit"] = total > API_RECORD_CAP
-        meta["api_record_cap"] = API_RECORD_CAP
+        # cap_hit: API 구조상 더 못 받음(pageno<=99 × page_size) → 올려도 해결 안 됨
+        meta["cap_hit"] = total > record_cap
+        meta["api_record_cap"] = record_cap
         if meta["cap_hit"]:
+            hint = ""
+            if size < MAX_DISPLAYLINES:
+                hint = (f" page_size 를 {MAX_DISPLAYLINES} 로 올리면 한계가 "
+                        f"{PAGENO_MAX * MAX_DISPLAYLINES:,}건까지 늘어납니다.")
             meta["cap_note"] = (
-                f"total {total:,}건이 회수 한계 {API_RECORD_CAP:,}건"
-                f"(pageno 최대 {PAGENO_MAX} × {MAX_DISPLAYLINES}건)을 넘습니다. "
-                f"max_records 를 올려도 {API_RECORD_CAP:,}건 이상은 받을 수 없습니다 — "
-                f"검색식을 좁히거나(dbname·발행년도) 검색어를 쪼개세요."
+                f"total {total:,}건이 회수 한계 {record_cap:,}건"
+                f"(pageno 최대 {PAGENO_MAX} × page_size {size}건)을 넘습니다. "
+                f"max_records 를 올려도 {record_cap:,}건 이상은 받을 수 없습니다 — "
+                f"검색식을 좁히거나(dbname·발행년도) 검색어를 쪼개세요.{hint}"
             )
         if meta["failed_pages"]:
             meta["incomplete_note"] = (
                 f"{len(meta['failed_pages'])}개 페이지가 재시도 후에도 실패해 결손입니다 — "
                 f"전수가 아닙니다.")
+        if option and not dbname:
+            # 🔴 `option`(연도 범위·원문유무)은 **상세검색 전용**이다. 통합검색(/basic)에
+            #    넘기면 서버가 **조용히 무시**한다 — 오류도 없다. 경고가 없으면 호출자는
+            #    연도 필터가 걸린 줄 알고 안 걸린 결과를 쓴다(적대적 리뷰가 라이브로 확인).
+            meta["option_ignored_warning"] = (
+                f"`option={option!r}` 은 통합검색에서 **무시됩니다**(상세검색 전용). "
+                f"연도 범위를 걸려면 `dbname` 을 함께 지정하세요 — "
+                f"지금 결과에는 필터가 적용되지 않았습니다.")
         if dbname in TOC_ALWAYS_EMPTY_DBNAMES:
             meta["toc_note"] = (
                 f"'{dbname}' 은 `목차` 가 전건 'N' 입니다(census 실측) — "
@@ -269,10 +308,18 @@ class NaClient:
                 seen.add(k)
                 merged.append(r)
                 new += 1
-            axes.append({"term": term, "total": m.get("total", 0),
-                         "fetched": m.get("fetched", 0), "new": new,
-                         "cap_hit": m.get("cap_hit", False),
-                         "failed_pages": len(m.get("failed_pages", []))})
+            axis = {"term": term, "total": m.get("total", 0),
+                    "fetched": m.get("fetched", 0), "new": new,
+                    "cap_hit": m.get("cap_hit", False),
+                    "failed_pages": len(m.get("failed_pages", []))}
+            # 🔴 검색어별 경고를 **여기서 버리면 na_collect 경로에는 방어선이 사라진다.**
+            #    초판이 그랬다 — 전체 카탈로그 오탐(ignored_search_warning)도, 조기 종료도,
+            #    option 무시도 수집에서는 한 번도 표면화되지 않았다(적대적 리뷰 지적).
+            for key in ("ignored_search_warning", "early_stop_note",
+                        "option_ignored_warning", "toc_note"):
+                if m.get(key):
+                    axis[key] = m[key]
+            axes.append(axis)
 
         meta: dict[str, Any] = {
             "terms": terms, "terms_searched": [a["term"] for a in axes], "axes": axes,
@@ -291,6 +338,13 @@ class NaClient:
                 f"{len(unsearched)}개 검색어를 **조회하지 않았습니다**: {', '.join(unsearched)}. "
                 f"합집합이 완전하지 않습니다 — max_records 를 올리거나 검색어를 나눠 실행하세요."
             )
+        # 검색어별 경고를 최상위로 끌어올린다 — axes 안에만 있으면 호출자가 못 본다.
+        for key in ("ignored_search_warning", "early_stop_note",
+                    "option_ignored_warning", "toc_note"):
+            hits = [a["term"] for a in axes if a.get(key)]
+            if hits:
+                sample = next(a[key] for a in axes if a.get(key))
+                meta[key] = f"[{', '.join(hits)}] {sample}"
         if meta["cap_hit_terms"]:
             meta["cap_note"] = (
                 f"다음 검색어가 회수 한계({API_RECORD_CAP:,}건)에 걸렸습니다 — 전수가 아닙니다: "
