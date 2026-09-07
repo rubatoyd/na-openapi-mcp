@@ -144,7 +144,10 @@ def update_readme(rows: dict[str, dict], snap: dict, today: str) -> None:
         return sum(int(rows[d].get(key) or 0) for d in recent)
 
     dl = snap.get("release_downloads") or "—"
-    chart = f"\n>\n> ![일별 클론·조회 추이]({CHART.as_posix()})\n" if write_chart(rows) else ""
+    # ⚠️ 두 분기 모두 **줄바꿈으로 끝나야 한다.** 빈 문자열이면 뒤따르는 `>` 가 같은 줄에
+    #    붙어 `누적 다운로드 **3**>` 처럼 렌더된다(실측). 자매 저장소는 항상 그래프가 있어
+    #    이 분기를 밟은 적이 없다 — 그래프 없는 저장소로 이식하며 드러났다.
+    chart = f"\n>\n> ![일별 클론·조회 추이]({CHART.as_posix()})\n" if write_chart(rows) else "\n"
     body = (f"> 📈 **사용량** — 최근 14일 조회 **{s('views'):,}**회(고유 {s('view_uniques'):,}) · "
             f"클론 **{s('clones'):,}**회(고유 {s('clone_uniques'):,}) · "
             f"릴리스 자산 누적 다운로드 **{dl}**"
