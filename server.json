@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.rubatoyd/na-openapi-mcp",
-  "description": "National Assembly Library of Korea catalog search - books, theses, articles, parliamentary records and bills",
-  "version": "0.1.0",
+  "description": "National Assembly Library of Korea catalog search (books, theses, articles, bills)",
+  "version": "0.1.1",
   "repository": {
     "url": "https://github.com/rubatoyd/na-openapi-mcp",
     "source": "github"
@@ -11,8 +11,8 @@
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/rubatoyd/na-openapi-mcp/releases/download/v0.1.0/na-openapi-mcp.mcpb",
-      "version": "0.1.0",
+      "identifier": "https://github.com/rubatoyd/na-openapi-mcp/releases/download/v0.1.1/na-openapi-mcp.mcpb",
+      "version": "0.1.1",
       "transport": {
         "type": "stdio"
       },

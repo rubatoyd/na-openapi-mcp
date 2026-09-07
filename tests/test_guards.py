@@ -404,3 +404,15 @@ def test_mcpb_manifests_declare_every_tool():
         declared = {t["name"] for t in
                     json.loads((root / f).read_text(encoding="utf-8"))["tools"]}
         assert declared == registered, f"{f}: 선언 {declared} vs 등록 {registered}"
+
+
+def test_registry_description_within_limit():
+    """🔴 MCP 레지스트리는 `description` 을 **100자**로 제한한다(422 로 거부).
+
+    v0.1.0 릴리스가 107자로 마지막 단계에서 실패했다 — 바이너리 3종을 다 빌드하고
+    GitHub Release 까지 만든 뒤였다. 태그를 밀기 전에 여기서 잡는다.
+    """
+    import json
+    root = pathlib.Path(__file__).parents[1]
+    sj = json.loads((root / "server.json").read_text(encoding="utf-8"))
+    assert len(sj["description"]) <= 100, f"{len(sj['description'])}자"

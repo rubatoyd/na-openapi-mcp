@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "na-openapi-mcp",
   "display_name": "국회도서관 자료검색기 (na-openapi-mcp)",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "국회도서관 자료검색 OpenAPI 수집기 — 도서·학위논문·국내외 기사·국회회의록·의안정보 등 21종 DB 서지 검색. 문서와 다른 실제 API 동작(레코드 태그·검색항목 함정·회수 한계)을 라이브 실측으로 확정했습니다. xlsx/csv/json/sqlite 내보내기",
   "author": {
     "name": "Yeondong Yang",
