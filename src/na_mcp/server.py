@@ -37,6 +37,31 @@ from .exporters import export
 
 mcp = FastMCP("na")
 
+# 🔴 도구 호출 한 번의 **쿼터 상한**. 개발계정은 하루 10,000건인데, 초판은
+#    `na_collect(terms=[…50개], max_records=10**9)` 이 최대 4,950회를 태울 수 있었다
+#    (일일 한도의 절반, 30분 이상, 중간 취소 지점 없음 — 적대적 리뷰 지적).
+MAX_CALLS_PER_TOOL_CALL = int(os.environ.get("NA_MAX_CALLS_PER_TOOL_CALL", "300"))
+
+
+def _estimate_calls(max_records: int, page_size: int | None, n_terms: int = 1) -> int:
+    size = min(max(1, page_size or MAX_DISPLAYLINES), MAX_DISPLAYLINES)
+    per_term = min(PAGENO_MAX, -(-max(1, int(max_records)) // size))
+    return per_term * max(1, n_terms)
+
+
+def _quota_guard(max_records: int, page_size: int | None, n_terms: int = 1):
+    """예상 호출 수가 상한을 넘으면 **호출 전에** 거부한다(실행 후 후회 방지)."""
+    est = _estimate_calls(max_records, page_size, n_terms)
+    if est <= MAX_CALLS_PER_TOOL_CALL:
+        return None
+    return {
+        "error": f"이 요청은 최대 약 {est:,}회 API 호출이 필요합니다 — 한 번의 도구 호출 상한"
+                 f"({MAX_CALLS_PER_TOOL_CALL:,}회)을 넘습니다. 개발계정 일일 한도는 10,000건입니다.",
+        "hint": "max_records 를 줄이거나, terms 를 나눠 여러 번 호출하거나, "
+                "page_size 를 키워(최대 1000) 페이지 수를 줄이세요.",
+        "estimated_calls": est, "limit": MAX_CALLS_PER_TOOL_CALL,
+    }
+
 
 def _safe(fn):
     """도구는 **항상 JSON 직렬화 가능한 dict** 를 반환 — 어떤 예외도 도구 밖으로 누수 금지.
@@ -130,6 +155,9 @@ def na_search(search: str, max_records: int = 20, dbname: str | None = None,
     """
     if get_api_key() is None:
         return dict(_NO_KEY)
+    over = _quota_guard(max_records, page_size)
+    if over:
+        return over
     client = NaClient()
     records, meta = client.search_meta(search, max_records=max_records, dbname=dbname,
                                        option=option, page_size=page_size,
@@ -171,6 +199,9 @@ def na_collect(terms: list[str] | None = None, search: str | None = None,
         return {"error": "terms 또는 search 중 하나는 있어야 합니다 "
                          "(형식: `검색항목,키워드`, 예: `전체,교육불평등`)."}
 
+    over = _quota_guard(max_records, page_size, len(term_list))
+    if over:
+        return over
     client = NaClient()
     records, meta = client.search_terms_meta(term_list, max_records=max_records,
                                              dbname=dbname, option=option,

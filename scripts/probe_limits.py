@@ -6,7 +6,8 @@
 ⚠️ 개발계정 일일 트래픽 10,000 건. 이 스크립트는 약 40회를 쓴다. throttle 로 정중하게 호출한다.
    (문서상 초당 최대 30 tps 이지만 그 근처로 갈 이유가 없다.)
 
-사용: python scripts/probe_limits.py [displaylines|paging|fields|dbname|observed|markup|all]
+사용: python scripts/probe_limits.py [displaylines|paging|fields|dbname|observed|markup|categories|all]
+⚠️ `categories` 는 후보 수에 따라 170~520회를 쓴다(ATTEMPTS=3). 나머지는 합쳐 약 40회.
 """
 from __future__ import annotations
 
@@ -255,6 +256,21 @@ CATEGORY_PROBE_WORD = "교육"
 ATTEMPTS = 3
 
 # 문서 목록 + 실측으로 발견한 변형(문서에 없으나 동작). 측정이 판정한다.
+# 🔴 **후보 집합이 자기 출력이면 재현이 성립하지 않는다.** `DB_CATEGORIES` 만 후보로 쓰면
+#    이미 걸러진 목록을 다시 확인할 뿐이라, 문서가 말하는 '문서에 있으나 거부되는 25개'를
+#    재관측할 수 없고 `지식공유`(후보 0개)는 **호출 0회**로 '없음' 판정이 난다.
+#    → 문서 목록(DISPLAY_ONLY_FIELDS 포함)과 타 dbname 어휘까지 후보에 넣는다.
+#    ⚠️ 그래도 '목록에 없는데 동작하는 이름'은 이 방법으로 못 찾는다(국회회의록/발행자 실례).
+#       완전한 발견에는 어휘 사전이 필요하다 — 한계를 알고 쓸 것.
+def _candidate_pool(db: str) -> list[str]:
+    from na_mcp.config import DISPLAY_ONLY_FIELDS
+    pool = list(DB_CATEGORIES.get(db, ())) + list(EXTRA_CANDIDATES.get(db, ()))
+    pool += list(DISPLAY_ONLY_FIELDS)
+    for other in DB_CATEGORIES.values():      # 타 자료종 어휘도 넣어 대칭 가정을 깬다
+        pool += list(other)
+    return list(dict.fromkeys(pool))
+
+
 EXTRA_CANDIDATES = {
     "학위논문": ("지도교수",),                    # 문서의 `지도교수(2009~)` 는 ERR04
     "학술지,잡지": ("수록지명/신문명",),            # 슬래시 포함 **한 덩어리** 이름
@@ -291,7 +307,7 @@ def probe_categories(only=None):
     p("🔑 ERR04(재시도 후에도) = 항목 거부 / total=N(0 포함) = 항목 유효")
     verified = {}
     for db in dbs:
-        cands = list(dict.fromkeys(tuple(DB_CATEGORIES[db]) + EXTRA_CANDIDATES.get(db, ())))
+        cands = _candidate_pool(db)
         ok = [c for c in cands if _category_ok(db, c)]
         bad = [c for c in cands if c not in ok]
         verified[db] = ok

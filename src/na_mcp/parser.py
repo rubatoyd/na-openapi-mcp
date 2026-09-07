@@ -91,21 +91,27 @@ def _check_error_envelope(root: ET.Element) -> None:
 
 
 def _envelope(root: ET.Element, total: int) -> dict[str, Any]:
-    """진단용 봉투 메타 — 레코드를 뺀 최상위 정보. 자격증명형 키는 제거한다."""
+    """진단용 봉투 메타 — 레코드를 뺀 최상위 정보.
+
+    🔴 **이름 블록리스트만으로는 못 막는다.** 초판은 `serviceKey` 같은 **태그명**만
+       걸렀는데, 오류 봉투가 `requestUrl`·`query`·`echo` 처럼 다른 이름으로 요청을
+       에코하면 인증키가 그대로 `meta['envelope']` → na_search 응답 → LLM 트랜스크립트로
+       샜다(적대적 리뷰가 실측). 그래서 **모든 값에 `scrub()` 도 건다**(이중 방어).
+    """
     env: dict[str, Any] = {"total": total}
     header = root.find("./header")
     if header is not None:
         for child in header:
             if child.tag.strip().lower() in _SECRET_KEYS:
                 continue
-            env[child.tag] = (child.text or "").strip()
+            env[child.tag] = scrub((child.text or "").strip())
     for child in root:
         # item·toc 는 본문이지 봉투가 아니다 — 넣으면 상세조회 봉투에 빈 "item" 이 낀다.
         if child.tag in ("header", "recode", "record", "total", "item", "toc"):
             continue
         if child.tag.strip().lower() in _SECRET_KEYS:
             continue
-        env.setdefault(child.tag, (child.text or "").strip())
+        env.setdefault(child.tag, scrub((child.text or "").strip()))
     return env
 
 
@@ -117,8 +123,9 @@ def _items_of(rec_el: ET.Element) -> list[tuple[str, str]]:
     """
     out: list[tuple[str, str]] = []
     for it in rec_el.findall("./item"):
+        # 레코드 값도 scrub 한다 — raw 는 xlsx/csv/json/sqlite 로 그대로 나간다.
         out.append(((it.findtext("name") or "").strip(),
-                    (it.findtext("value") or "").strip()))
+                    scrub((it.findtext("value") or "").strip())))
     return out
 
 
@@ -242,7 +249,7 @@ def parse_detail_response(body: str | bytes) -> tuple[dict[str, str], dict[str, 
     for it in root.findall("./item"):
         # 상세정보에는 하이라이트가 관측되지 않았지만(검색이 아니므로) 같은 정제를 건다.
         name = clean_html(it.findtext("name"))
-        value = clean_html(it.findtext("value"))
+        value = scrub(clean_html(it.findtext("value")))
         if not name:
             continue
         fields[name] = f"{fields[name]}; {value}" if fields.get(name) else value

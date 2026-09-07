@@ -24,6 +24,8 @@ from .config import (
     PAGENO_MAX,
     DETAIL_INFO_URL,
     HEAVY_DBNAMES,
+    install_log_scrubber,
+    zero_yield_fields,
     SEARCH_BASIC_URL,
     SEARCH_DETAIL_URL,
     TOC_ALWAYS_EMPTY_DBNAMES,
@@ -55,6 +57,7 @@ class NaClient:
     def __init__(self, *, throttle: float = 0.4, timeout: int = 30,
                  max_retries: int = 3) -> None:
         use_os_trust()          # ⚠️ 등록 명령줄이 아니라 코드에서 — .mcpb/바이너리 경로 대응
+        install_log_scrubber()  # urllib3 DEBUG 가 인증키 든 URL 을 찍는 것을 막는다
         self.throttle = max(0.0, throttle)
         self.timeout = timeout
         self.max_retries = max(1, max_retries)
@@ -251,6 +254,12 @@ class NaClient:
             meta["incomplete_note"] = (
                 f"{len(meta['failed_pages'])}개 페이지가 재시도 후에도 실패해 결손입니다 — "
                 f"전수가 아닙니다.")
+        dead = zero_yield_fields(dbname, search)
+        if dead:
+            meta["zero_yield_warning"] = (
+                f"'{dbname}' 에서 {', '.join(dead)} 은(는) API 가 수락하지만 **어떤 검색어로도 "
+                f"0건**입니다(실측) — 색인이 비어 있습니다. 결과 0건을 '해당 자료 없음'으로 "
+                f"읽으면 안 됩니다. `전체항목` 등 다른 검색항목을 쓰세요.")
         if option and not dbname:
             # 🔴 `option`(연도 범위·원문유무)은 **상세검색 전용**이다. 통합검색(/basic)에
             #    넘기면 서버가 **조용히 무시**한다 — 오류도 없다. 경고가 없으면 호출자는
@@ -316,7 +325,7 @@ class NaClient:
             #    초판이 그랬다 — 전체 카탈로그 오탐(ignored_search_warning)도, 조기 종료도,
             #    option 무시도 수집에서는 한 번도 표면화되지 않았다(적대적 리뷰 지적).
             for key in ("ignored_search_warning", "early_stop_note",
-                        "option_ignored_warning", "toc_note"):
+                        "option_ignored_warning", "toc_note", "zero_yield_warning"):
                 if m.get(key):
                     axis[key] = m[key]
             axes.append(axis)
@@ -340,7 +349,7 @@ class NaClient:
             )
         # 검색어별 경고를 최상위로 끌어올린다 — axes 안에만 있으면 호출자가 못 본다.
         for key in ("ignored_search_warning", "early_stop_note",
-                    "option_ignored_warning", "toc_note"):
+                    "option_ignored_warning", "toc_note", "zero_yield_warning"):
             hits = [a["term"] for a in axes if a.get(key)]
             if hits:
                 sample = next(a[key] for a in axes if a.get(key))
@@ -390,7 +399,13 @@ class NaClient:
             f"일시 오류와 구분되지 않으므로 제어번호를 먼저 확인하세요."))
 
     def detail(self, controlno: str) -> tuple[dict[str, str], dict[str, Any]]:
-        """상세정보 항목조회 — 검색 결과보다 필드가 많다(ISBN·DDC·별치기호·자료실 등)."""
+        """상세정보 항목조회.
+
+        🔴 **검색 결과와 필드 집합·값이 완전히 동일하다**(실측: 일반도서 19 ·
+           학위논문 18 · 국내기사 13 · 고서 19 · 웹자료 17 — 상세전용 필드 0).
+           이미 검색한 자료에 부르는 것은 쿼터 낭비다. 제어번호만 아는 자료를
+           조회할 때 쓴다. 목차 본문이 필요하면 `toc()` 를 쓸 것.
+        """
         return self._lookup(DETAIL_INFO_URL, controlno, parse_detail_response, what="상세정보")
 
     def toc(self, controlno: str) -> tuple[str, dict[str, Any]]:

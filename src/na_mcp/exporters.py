@@ -94,17 +94,29 @@ def export(records: Sequence[Record], formats: Sequence[str], out_dir: str,
     `name` 은 사용자 입력(도구 인자·검색어)에서 오므로 **여기서** 정규화한다 —
     호출부마다 처리하면 한 곳을 빠뜨린다.
     """
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    base = out.resolve()
-    stem = safe_name(name)
-    paths: list[str] = []
+    # 🔴 **쓰기 전에 전부 검증한다.** 초판은 쓰기 루프 안에서 검증해, `['json','bogus']`
+    #    가 json 을 쓴 뒤 예외를 냈다 — 수집 레코드·axes·cap_hit 같은 meta 가 통째로
+    #    사라지고 쿼터는 이미 쓴 뒤였다(적대적 리뷰 실측).
+    if isinstance(formats, str):
+        # ⚠️ 문자열을 넘기면 문자 단위로 순회해 '지원하지 않는 형식: j' 가 났다.
+        formats = [formats]
+    keys: list[str] = []
     for fmt in formats:
         key = str(fmt).lower().lstrip(".")
         if key == "db":
             key = "sqlite"
         if key not in _EXPORTERS:
-            raise ValueError(f"지원하지 않는 출력형식: {fmt} (가능: {list(_EXPORTERS)})")
+            raise ValueError(
+                f"지원하지 않는 출력형식: {fmt!r} (가능: {list(_EXPORTERS)}). "
+                f"아무 파일도 쓰지 않았습니다.")
+        keys.append(key)
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    base = out.resolve()
+    stem = safe_name(name)
+    paths: list[str] = []
+    for key in keys:
         p = (out / f"{stem}{_EXT[key]}").resolve()
         # 정규화를 뚫는 경로가 남아 있으면 여기서 멈춘다(이중 방어).
         if base != p.parent:

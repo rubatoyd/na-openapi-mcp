@@ -27,6 +27,15 @@ def _p(*a) -> None:
     print(*a)
 
 
+def _require_key() -> bool:
+    """인증키가 없으면 안내하고 False. (초판은 raw traceback 으로 죽었다 — MCP 도구와 불일치)"""
+    if get_api_key() is not None:
+        return True
+    _p("✗ NA_API_KEY 미설정 — .env 또는 환경변수로 설정하세요.")
+    _p("  발급: https://www.data.go.kr '국회 국회도서관_자료검색 서비스' 활용신청")
+    return False
+
+
 def cmd_status(_args) -> int:
     if get_api_key() is None:
         _p("✗ NA_API_KEY 미설정 — .env 또는 환경변수로 설정하세요.")
@@ -44,6 +53,8 @@ def cmd_status(_args) -> int:
 
 
 def cmd_search(args) -> int:
+    if not _require_key():
+        return 1
     client = NaClient(throttle=args.throttle)
     try:
         records, meta = client.search_meta(
@@ -54,7 +65,9 @@ def cmd_search(args) -> int:
         return 1
     _p(f"total={meta['total']:,}  회수={meta['fetched']:,}  "
        f"truncated={meta['truncated']}  cap_hit={meta['cap_hit']}")
-    for note in ("cap_note", "incomplete_note", "ignored_search_warning"):
+    for note in ("cap_note", "incomplete_note", "ignored_search_warning",
+                 "zero_yield_warning", "option_ignored_warning",
+                 "early_stop_note", "toc_note"):
         if meta.get(note):
             _p(f"⚠️  {meta[note]}")
     for r in records:
@@ -63,6 +76,8 @@ def cmd_search(args) -> int:
 
 
 def cmd_collect(args) -> int:
+    if not _require_key():
+        return 1
     terms = args.terms or ([args.search] if args.search else [])
     if not terms:
         _p("✗ --terms 또는 --search 가 필요합니다 (형식: `검색항목,키워드`)")
@@ -76,19 +91,28 @@ def cmd_collect(args) -> int:
         _p(f"✗ {scrub(str(e))}")
         return 1
 
+    before = len(records)
     if args.contains:
         records = [r for r in records if r.matches(args.contains)]
     if args.year_from or args.year_to:
         lo, hi = args.year_from or 0, args.year_to or 9999
         records = [r for r in records
                    if r.pub_year.isdigit() and lo <= int(r.pub_year) <= hi]
+    # MCP 쪽과 같은 메타를 남긴다 — 초판은 --json 에서 이 정보가 빠져 있었다.
+    meta["filtered_out"] = before - len(records)
+    meta["kept"] = len(records)
+    meta["local_filters"] = {"contains": args.contains, "year_from": args.year_from,
+                             "year_to": args.year_to,
+                             "note": "로컬 후처리 — 회수 한계를 풀어주지 않는다"}
 
     _p(f"수집 {len(records):,}건 "
        f"(검색어 {len(meta['terms_searched'])}/{len(terms)}개 조회)")
     for a in meta["axes"]:
         _p(f"  - {a['term']}: total={a['total']:,} 회수={a['fetched']:,} 신규={a['new']:,}"
            + ("  ⚠️ cap_hit" if a["cap_hit"] else ""))
-    for note in ("stopped_early_note", "cap_note", "incomplete_note"):
+    for note in ("stopped_early_note", "cap_note", "incomplete_note",
+                 "ignored_search_warning", "zero_yield_warning",
+                 "option_ignored_warning", "early_stop_note", "toc_note"):
         if meta.get(note):
             _p(f"⚠️  {meta[note]}")
 
@@ -104,6 +128,8 @@ def cmd_collect(args) -> int:
 
 
 def cmd_detail(args) -> int:
+    if not _require_key():
+        return 1
     try:
         fields, _env = NaClient().detail(args.controlno)
     except (NaError, ValueError) as e:
@@ -116,6 +142,8 @@ def cmd_detail(args) -> int:
 
 
 def cmd_toc(args) -> int:
+    if not _require_key():
+        return 1
     try:
         toc, env = NaClient().toc(args.controlno)
     except (NaError, ValueError) as e:
@@ -129,16 +157,42 @@ def cmd_toc(args) -> int:
     return 0
 
 
-def cmd_fields(_args) -> int:
+def cmd_fields(args) -> int:
+    """MCP `na_fields` 와 **같은 사실**을 보여준다.
+
+    ⚠️ 초판은 문서 목록(SEARCH_FIELDS_BASIC + DBNAMES)만 찍고, 마지막 줄에서
+       `openapi.nanet.go.kr/S3002_03.html` 로 보냈다 — 그 페이지는 CLAUDE.md §F-3 이
+       "실측과 크게 어긋나니 그대로 쓰면 안 된다" 고 못박은 바로 그 문서다.
+    """
+    from .server import na_fields
+
+    data = na_fields()
+    if getattr(args, "json", False):
+        _p(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0
+
     _p("통합검색(/basic) 검색항목 — 이 7종만 유효:")
-    for f in SEARCH_FIELDS_BASIC:
-        _p(f"  · {f}")
-    _p("\n🔴 그 밖의 값은 오류가 아니라 검색어를 무시하고 전체 카탈로그 13,097,591건을 반환한다.")
-    _p("   특히 `저자명` 은 상세검색에서는 유효하나 통합검색에서는 `저자` 를 써야 한다.")
-    _p(f"\n상세검색(/detail) dbname {len(DBNAMES)}종:")
-    for d in DBNAMES:
-        _p(f"  · {d}")
-    _p("\n상세검색은 검색항목 어휘가 DB마다 다르다 → https://openapi.nanet.go.kr/S3002_03.html")
+    _p("  " + " · ".join(data["통합검색_검색항목"]))
+    _p("")
+    _p("🔴 " + data["경고"])
+    _p("")
+    _p("상세검색(/detail) — dbname 별 검색항목 (실측값):")
+    for db, cats in data["상세검색_dbname별_검색항목"].items():
+        mark = "  ⚠️ 사용 불가" if not cats else ""
+        _p(f"  · {db}{mark}")
+        if cats:
+            _p(f"      {', '.join(cats)}")
+    _p("")
+    _p("🔴 " + data["상세검색_주의"])
+    _p("")
+    _p(f"목차가 전건 없는 자료종(na_toc 무의미): "
+       f"{', '.join(data['목차_전건없음_자료종'])}")
+    _p(f"서술형 본문이 있는 자료종: {data['서술형_본문_있는_자료종']}")
+    _p("")
+    _p(data["초록_경고"])
+    _p(data["국외기사_주의"])
+    _p("")
+    _p("전체 census(구조적 빈 필드·안내문 값 등)는 `na fields --json` 으로 보세요.")
     return 0
 
 
@@ -147,7 +201,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("status", help="인증키·연결 점검").set_defaults(fn=cmd_status)
-    sub.add_parser("fields", help="검색항목·dbname 목록").set_defaults(fn=cmd_fields)
+    fp = sub.add_parser("fields", help="검색항목·dbname 유효값 + census(실측)")
+    fp.add_argument("--json", action="store_true", help="전체 census 를 JSON 으로")
+    fp.set_defaults(fn=cmd_fields)
 
     d = sub.add_parser("detail", help="제어번호 1건 상세정보")
     d.add_argument("controlno", help="검색 결과의 제어번호 (예: MONO12026000012887)")

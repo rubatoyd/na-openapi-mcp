@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import urllib.parse
 
@@ -174,6 +175,31 @@ def is_placeholder(value: str | None) -> bool:
     return False
 
 
+# 🔴 **수락되지만 어떤 검색어로도 0건**인 (dbname, 검색항목) 조합 — ✅ 적대적 리뷰 실측.
+#    ERR04 가 아니라 정상 200 + total=0 이라 화이트리스트 판정법
+#    ("ERR04=거부 / total=N=유효")이 **유효로 기록해 버렸다.** 그 결과
+#    `na_search(dbname='일반도서', search='목차,교육')` 이 오류도 경고도 없이 0건을 준다 —
+#    이 저장소가 막겠다고 선언한 '조용한 절단'과 같은 실패 양식이다.
+#    ⚠️ 거부하지 않고 **경고**한다: API 가 실제로 수락하는 값이고, 색인이 채워지면
+#       동작할 수 있다. 다만 지금은 쓸모없다는 사실을 반드시 알려야 한다.
+#    실측: 동작 = 학위논문(346,565)·국내기사(302,024)·마이크로폼자료(75).
+ALWAYS_ZERO_CATEGORIES = {
+    "일반도서": ("목차",), "세미나자료": ("목차",), "웹자료": ("목차",),
+    "고서": ("목차",), "동영상자료": ("목차",), "E-BOOK": ("목차",),
+    "학술지,잡지": ("목차",), "신문": ("목차",), "국외기사": ("목차",),
+    "외국법률번역DB": ("목차",),
+}
+
+
+def zero_yield_fields(dbname: str | None, search: str) -> list[str]:
+    """이 조합에서 **항상 0건**으로 실측된 검색항목들을 돌려준다(경고용)."""
+    if not dbname:
+        return []
+    dead = ALWAYS_ZERO_CATEGORIES.get(dbname, ())
+    used = [c.split(",", 1)[0].strip() for c in (search or "").split("|") if "," in c]
+    return [f for f in used if f in dead]
+
+
 # 🔴 `목차` 가 **상수 'N'** 인 자료종 — `na_toc` 호출이 통째로 무의미하다(쿼터만 쓴다).
 TOC_ALWAYS_EMPTY_DBNAMES = frozenset({
     "E-BOOK", "학술지,잡지", "신문", "국외기사", "동영상자료",
@@ -182,8 +208,11 @@ TOC_ALWAYS_EMPTY_DBNAMES = frozenset({
 # ⚠️ `displaylines=500` 에서 ConnectionError 로 끊기는 자료종(레코드가 무겁다).
 HEAVY_DBNAMES = {"외국법률번역DB": 200, "표,그림DB": 200}
 
-# 🔴 해당 자료종에서 **키는 오지만 값이 전건 비어 있는** 필드.
+# 🔴 해당 자료종에서 **표본 전건 값이 비어 있던** 필드.
 #    `if k in fields` 는 모든 자료종에서 항상 True 라 판별력이 0이다.
+# ⚠️ **'모집단에 없다'가 아니라 '이 표본에 없었다'** 이다 — 적대적 리뷰가 고서 `ISBN` 을
+#    795건 재측정해 10건(영인 총서 계열)을 찾아내 목록에서 뺐다. 표본이 192건이었고
+#    1.26% 라면 0건이 나올 확률이 약 9% 다. 나머지 항목도 같은 성격의 한정 주장이다.
 EMPTY_FIELDS_BY_DB = {
     "학위논문": ("전공",),
     "학술지,잡지": ("발행국",),
@@ -192,7 +221,7 @@ EMPTY_FIELDS_BY_DB = {
     "웹자료": ("CIS/UNSA",),
     "세미나자료": ("CIS/UNSA",),
     "E-BOOK": ("ISSN", "초록유무", "자료실"),
-    "고서": ("ISBN", "ISSN", "초록유무"),
+    "고서": ("ISSN", "초록유무"),   # ISBN 은 반증됨(영인 총서에 존재)
     "국외기사": ("초록유무",),
     "국회회의록": ("발행자", "자료실"),
     "국회의안정보": ("자료실",),
@@ -402,6 +431,48 @@ def scrub(text: str) -> str:
     for frag in secret_fragments():
         s = s.replace(frag, "***KEY***")
     return s
+
+
+class _ScrubFilter(logging.Filter):
+    """로그 레코드에서 인증키를 지운다.
+
+    🔴 §6-C 결정에 따라 키는 **반드시 쿼리스트링에 들어간다.** 그래서 urllib3 가 DEBUG
+       레벨에서 찍는 요청 라인이 전부 키를 싣는다 — `scrub()` 이 닿지 않던 유일한
+       반출 경로였다(적대적 리뷰가 실측으로 잡았다).
+       로거를 끄지 않고 **값만 지운다** — 디버깅 능력을 뺏지 않기 위해서다.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
+        try:
+            if isinstance(record.msg, str):
+                record.msg = scrub(record.msg)
+            if record.args:
+                if isinstance(record.args, tuple):
+                    record.args = tuple(
+                        scrub(a) if isinstance(a, str) else a for a in record.args)
+                elif isinstance(record.args, dict):
+                    record.args = {k: (scrub(v) if isinstance(v, str) else v)
+                                   for k, v in record.args.items()}
+        except Exception:  # noqa: BLE001 — 로깅이 예외를 내면 안 된다
+            pass
+        return True
+
+
+_SCRUB_INSTALLED = False
+
+
+def install_log_scrubber() -> None:
+    """인증키를 찍을 수 있는 로거에 scrub 필터를 건다 (중복 설치 안 함).
+
+    ⚠️ 라이브러리가 루트 로거를 건드리지 않는다 — 필터는 해당 로거에만 붙인다.
+    """
+    global _SCRUB_INSTALLED
+    if _SCRUB_INSTALLED:
+        return
+    f = _ScrubFilter()
+    for name in ("urllib3", "urllib3.connectionpool", "requests", "na_mcp"):
+        logging.getLogger(name).addFilter(f)
+    _SCRUB_INSTALLED = True
 
 
 _TRUST_INJECTED = False

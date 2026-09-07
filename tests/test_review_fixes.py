@@ -203,3 +203,115 @@ def test_early_stop_is_reported(monkeypatch):
     monkeypatch.setattr(client, "_fetch_page", fake)
     _r, meta = client.search_meta("전체,교육", max_records=5_000)
     assert "early_stop_note" in meta
+
+
+# ── [27] NAME_MAP 이 매핑하는 필드가 COLUMNS 에서 빠져 출력에서 사라졌다 ─────
+
+def test_every_mapped_field_reaches_output():
+    """🔴 11개 필드(지도교수·소관위원회·처리상태·발행국·간행빈도·별치기호…)가
+    to_row() 를 쓰는 csv·xlsx·MCP 응답에서 통째로 사라져 있었다."""
+    from na_mcp.models import COLUMNS, NAME_MAP
+    missing = sorted(set(NAME_MAP.values()) - set(COLUMNS))
+    assert not missing, f"COLUMNS 에서 빠진 매핑 필드: {missing}"
+
+
+def test_placeholder_fields_reach_table_output():
+    """빈 값이 '미입력'인지 '안내문'인지 csv·xlsx 에서도 구분돼야 한다."""
+    rec = record_from_items([("제어번호", "c1"), ("DDC", "전자형태로만 열람 가능함")])
+    row = rec.to_row()
+    assert "placeholder_fields" in row
+    assert "DDC" in row["placeholder_fields"]
+
+
+# ── [20] 자격증명이 태그 이름 블록리스트를 우회했다 ─────────────────────────
+
+def test_envelope_scrubs_values_not_just_tag_names(monkeypatch):
+    """🔴 `requestUrl`·`echo` 처럼 다른 이름으로 요청을 에코하면 키가 그대로 샜다."""
+    monkeypatch.setenv("NA_API_KEY_ENCODED", "SECRETKEYVALUE123456")
+    from na_mcp.parser import parse_search_response
+    xml = ('<?xml version="1.0" encoding="UTF-8"?><response>'
+           '<header><resultCode>00</resultCode></header><total>0</total>'
+           '<requestUrl>https://x?serviceKey=SECRETKEYVALUE123456&amp;pageno=1</requestUrl>'
+           '</response>')
+    _total, _recs, env = parse_search_response(xml)
+    assert "SECRETKEYVALUE123456" not in str(env)
+
+
+def test_record_values_are_scrubbed(monkeypatch):
+    """레코드 값은 raw → xlsx/csv/json/sqlite 로 그대로 나간다."""
+    monkeypatch.setenv("NA_API_KEY_ENCODED", "SECRETKEYVALUE123456")
+    from na_mcp.parser import parse_search_response
+    xml = ('<?xml version="1.0" encoding="UTF-8"?><response>'
+           '<header><resultCode>00</resultCode></header><total>1</total>'
+           '<recode><item><name>제어번호</name><value>SECRETKEYVALUE123456</value></item>'
+           '</recode></response>')
+    _t, recs, _e = parse_search_response(xml)
+    assert "SECRETKEYVALUE123456" not in str(recs[0].raw)
+
+
+# ── [19] urllib3 DEBUG 가 인증키 든 URL 을 찍었다 ───────────────────────────
+
+def test_log_scrubber_masks_key_in_urllib3(monkeypatch):
+    import io
+    import logging as _lg
+    monkeypatch.setenv("NA_API_KEY_ENCODED", "SECRETKEYVALUE123456")
+    C.install_log_scrubber.__globals__["_SCRUB_INSTALLED"] = False
+    C.install_log_scrubber()
+    buf = io.StringIO()
+    handler = _lg.StreamHandler(buf)
+    lg = _lg.getLogger("urllib3.connectionpool")
+    lg.addHandler(handler)
+    lg.setLevel(_lg.DEBUG)
+    try:
+        lg.debug('GET /y?serviceKey=%s&pageno=1', "SECRETKEYVALUE123456")
+    finally:
+        lg.removeHandler(handler)
+    assert "SECRETKEYVALUE123456" not in buf.getvalue()
+
+
+# ── [16] 형식 오류가 수집 결과를 통째로 날렸다 ──────────────────────────────
+
+def test_bad_format_writes_nothing(tmp_path):
+    """🔴 초판은 json 을 쓴 뒤 예외를 내서 meta 가 통째로 사라지고 쿼터는 이미 썼다."""
+    from na_mcp.exporters import export
+    from na_mcp.models import Record
+    with pytest.raises(ValueError, match="아무 파일도"):
+        export([Record(control_no="c1")], ["json", "bogus"], str(tmp_path), "adv")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_format_string_is_not_iterated_per_character(tmp_path):
+    """`formats='json'` 이 문자 단위로 순회해 '형식: j' 오류가 났다."""
+    from na_mcp.exporters import export
+    from na_mcp.models import Record
+    paths = export([Record(control_no="c1")], "json", str(tmp_path), "x")
+    assert len(paths) == 1 and paths[0].endswith(".json")
+
+
+# ── [18] 도구 호출 하나가 쿼터를 무제한으로 태웠다 ──────────────────────────
+
+def test_quota_guard_refuses_before_calling():
+    from na_mcp import server as srv
+    out = srv.na_collect(terms=["전체,교육"] * 50, max_records=10 ** 9)
+    assert "error" in out and out["estimated_calls"] > out["limit"]
+
+
+def test_quota_guard_allows_normal_requests():
+    from na_mcp import server as srv
+    assert srv._quota_guard(1000, None, 1) is None
+
+
+# ── [2] 수락되지만 항상 0건인 검색항목 ──────────────────────────────────────
+
+def test_zero_yield_field_is_warned():
+    """🔴 ERR04 가 아니라 정상 200+total=0 이라 화이트리스트가 '유효'로 기록했다."""
+    assert C.zero_yield_fields("일반도서", "목차,교육") == ["목차"]
+    assert C.zero_yield_fields("학위논문", "목차,교육") == []   # 여기선 실제로 동작한다
+    assert C.zero_yield_fields(None, "전체,교육") == []
+
+
+# ── [1] 소표본으로 '전건 빈값'을 단정했다 ───────────────────────────────────
+
+def test_gosuh_isbn_no_longer_claimed_empty():
+    """795건 재측정에서 10건이 나와 반증됐다 — 192건 표본의 한계."""
+    assert "ISBN" not in C.EMPTY_FIELDS_BY_DB["고서"]

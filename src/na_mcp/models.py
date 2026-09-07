@@ -20,13 +20,19 @@ from typing import Any
 from .config import is_placeholder
 
 # 표 출력(csv/xlsx/sqlite) 시 컬럼 순서
+# ⚠️ **NAME_MAP 이 매핑하는 필드는 전부 여기 있어야 한다.** 빠지면 `to_row()` 를 쓰는
+#    csv·xlsx 와 MCP 응답에서 통째로 사라진다 — 초판에서 11개가 그렇게 유실됐다
+#    (`지도교수`·`소관위원회`·`처리상태`·`발행국`·`간행빈도`·`별치기호` 등).
+#    회귀 테스트가 NAME_MAP ⊆ COLUMNS 를 고정한다.
 COLUMNS = [
-    "source", "control_no", "title", "authors", "publisher",
-    "pub_year", "journal", "keywords", "call_no", "class_no",
-    "isbn", "issn", "language", "db_name", "location",
+    "source", "control_no", "title", "authors", "advisor", "publisher",
+    "pub_year", "pub_year_raw", "pub_info", "pub_country", "journal", "frequency",
+    "keywords", "call_no", "class_no", "shelf_mark",
+    "isbn", "issn", "language", "db_name", "location", "source_info",
     "degree", "university", "major",
+    "committee", "status", "assembly_term", "meeting",
     "has_toc", "has_abstract", "has_fulltext", "has_audio", "copyright_ok",
-    "detail_url",
+    "detail_url", "placeholder_fields",
 ]
 
 # `<item><name>` → 정규화 필드. **여러 이름이 한 필드로 모인다**(자료종마다 이름이 다르므로).
@@ -169,8 +175,14 @@ class Record:
     placeholder_fields: list[str] = field(default_factory=list)
 
     def to_row(self) -> dict[str, Any]:
-        """평탄화된 표 한 행(dict)."""
-        return {col: getattr(self, col, "") for col in COLUMNS}
+        """평탄화된 표 한 행(dict).
+
+        `placeholder_fields` 는 목록이므로 표 출력용으로 `;` 결합한다 —
+        빈 값이 '미입력'인지 '안내문'인지 csv·xlsx 에서도 구분되게 하기 위해서다.
+        """
+        row = {col: getattr(self, col, "") for col in COLUMNS}
+        row["placeholder_fields"] = ";".join(self.placeholder_fields)
+        return row
 
     def fulltext_available(self) -> bool:
         """원문 DB 가 있는가 (원본DB유무 == Y)."""
