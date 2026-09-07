@@ -7,6 +7,8 @@
 [![Downloads](https://img.shields.io/github/downloads/rubatoyd/na-openapi-mcp/total?label=downloads)](https://github.com/rubatoyd/na-openapi-mcp/releases)
 
 <!-- usage:start -->
+> 📈 **사용량** — 최근 14일 조회 **0**회(고유 0) · 클론 **0**회(고유 0) · 릴리스 자산 누적 다운로드 **3**>
+> <sub>2026-09-07 자동 갱신 · 전체 이력은 [`docs/usage.csv`](docs/usage.csv). GitHub 트래픽 통계는 14일 창만 제공하므로 이 저장소가 매일 찍어 누적한다.</sub>
 <!-- usage:end -->
 
 **국회도서관(National Assembly Library of Korea) 자료검색** OpenAPI 를 Claude 등 MCP
