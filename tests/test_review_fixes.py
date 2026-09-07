@@ -290,8 +290,13 @@ def test_format_string_is_not_iterated_per_character(tmp_path):
 
 # ── [18] 도구 호출 하나가 쿼터를 무제한으로 태웠다 ──────────────────────────
 
-def test_quota_guard_refuses_before_calling():
+def test_quota_guard_refuses_before_calling(monkeypatch):
+    """⚠️ **인증키 유무에 의존하면 안 된다.** 초판은 키가 있는 로컬에서만 통과하고
+       CI(키 없음)에서는 `_NO_KEY` 가 먼저 반환돼 실패했다 — CI 가 잡아준 결함이다.
+       도구는 키 확인 → 쿼터 가드 순서이므로 키가 있는 상태를 만들어 가드까지 보낸다.
+    """
     from na_mcp import server as srv
+    monkeypatch.setattr(srv, "get_api_key", lambda: "dummy")
     out = srv.na_collect(terms=["전체,교육"] * 50, max_records=10 ** 9)
     assert "error" in out and out["estimated_calls"] > out["limit"]
 
