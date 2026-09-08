@@ -3,7 +3,7 @@
     "na": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/rubatoyd/na-openapi-mcp", "na-mcp"],
+      "args": ["--from", "git+https://github.com/rubatoyd/na-openapi-mcp@v0.1.1", "na-mcp"],
       "env": {
         "NA_API_KEY": "${NA_API_KEY:-}",
         "NA_API_KEY_ENCODED": "${NA_API_KEY_ENCODED:-}",
