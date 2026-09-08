@@ -416,3 +416,45 @@ def test_registry_description_within_limit():
     root = pathlib.Path(__file__).parents[1]
     sj = json.loads((root / "server.json").read_text(encoding="utf-8"))
     assert len(sj["description"]) <= 100, f"{len(sj['description'])}자"
+
+
+# ── 한국어 Windows(cp949) 에서 stdio 가 한글을 온전히 나르는가 ────────────────
+# 🔴 이 저장소의 사용자 환경은 한국어 Windows 이고 기본 인코딩이 cp949 다.
+#    오늘 CLI 가 `—`(U+2014) 하나로 죽었다 — 응답이 한글투성이인 MCP 경로도 확인해야 한다.
+#    (실측 결과 mcp SDK 는 환경과 무관하게 UTF-8 스트림을 쓴다. 그 속성을 여기서 고정한다.)
+
+def test_mcp_stdio_survives_cp949_environment():
+    import json
+    import os
+    import subprocess
+    import sys
+
+    root = pathlib.Path(__file__).parents[1]
+    env = {**os.environ, "PYTHONIOENCODING": "cp949"}
+    env.pop("PYTHONUTF8", None)
+    p = subprocess.Popen([sys.executable, "-m", "na_mcp.server"], cwd=str(root), env=env,
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def send(o):
+        p.stdin.write((json.dumps(o) + "\n").encode())
+        p.stdin.flush()
+
+    try:
+        send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+              "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                         "clientInfo": {"name": "t", "version": "0"}}})
+        p.stdout.readline()
+        send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        # na_fields 는 설정 census 를 돌려주는 **오프라인** 도구 — API 를 부르지 않는다.
+        send({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+              "params": {"name": "na_fields", "arguments": {}}})
+        txt = json.loads(p.stdout.readline().decode("utf-8"))["result"]["content"][0]["text"]
+    finally:
+        try:
+            p.stdin.close()
+        except Exception:  # noqa: BLE001
+            pass
+        p.terminate()
+
+    for word in ("기본검색", "학위논문", "국회회의록", "수록지명/신문명"):
+        assert word in txt, f"cp949 환경에서 '{word}' 가 깨졌다"
