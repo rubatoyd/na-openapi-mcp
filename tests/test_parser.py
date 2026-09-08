@@ -268,3 +268,35 @@ def test_toc_paragraph_tag_becomes_newline():
     assert "\n" in toc
     assert toc.split("\n")[0] == "제1장 서론 1"
     assert " 1. 배경 3" in toc.split("\n")   # 계층 들여쓰기 보존
+
+
+# ── 🔴 목차 파서에만 resultCode 검사가 빠져 있었다 (2026-09-08) ─────────────────
+# 검색·상세 파서는 `./header/resultCode` 를 보는데 목차 파서만 안 봤다.
+# `_check_error_envelope` 는 게이트웨이 봉투(루트가 <OpenAPI_ServiceResponse>)만 잡으므로,
+# 루트가 <response> 인 채 코드만 비정상인 응답(ECHO_KEY_ERR = 10)은 그대로 통과했다.
+# 그 응답에는 <toc> 가 없어 **오류가 '목차 없음'으로 조용히 바뀌었다.**
+
+def test_toc_result_code_error_raises_instead_of_empty():
+    xml = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?><response>"
+           "<header><resultMsg>ERR</resultMsg><resultCode>10</resultCode></header>"
+           "</response>")
+    with pytest.raises(ApiError) as e:
+        parse_toc_response(xml)
+    assert e.value.code == "10"
+
+
+def test_toc_result_code_error_is_not_reported_as_missing_toc():
+    """이 실패 양식의 본질 — 오류를 '목차 없음'으로 바꿔 돌려주면 대량 보강에서
+    실패 전건이 '목차 없는 자료'로 굳는다. 코드가 비정상이면 반드시 올라와야 한다."""
+    xml = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?><response>"
+           "<toc></toc>"
+           "<header><resultMsg>ERR</resultMsg><resultCode>22</resultCode></header>"
+           "</response>")
+    with pytest.raises(ApiError):
+        parse_toc_response(xml)
+
+
+def test_toc_result_code_00_still_passes():
+    """정상 코드는 그대로 통과해야 한다 — 검사가 과잉이면 전건이 죽는다."""
+    toc, env = parse_toc_response(S.TOC_OK)
+    assert env["has_toc"] is True and "추천의 글" in toc

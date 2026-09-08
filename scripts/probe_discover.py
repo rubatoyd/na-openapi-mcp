@@ -33,7 +33,9 @@ _HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 sys.path.insert(0, str(_HERE.parent / "src"))
 
-from probe_api import fetch, p  # noqa: E402
+from probe_api import ProbeAborted, fetch, p  # noqa: E402
+
+from na_mcp.parser import TERMINAL_CODES  # noqa: E402
 
 from na_mcp.config import DB_CATEGORIES  # noqa: E402
 
@@ -90,20 +92,33 @@ def observed_field_names(dbname: str) -> list[str]:
 
 
 def classify(dbname: str, field: str) -> tuple[str, int]:
-    """검색항목 한 개를 3단계로 판정. (판정, 최대 total)"""
+    """검색항목 한 개를 4단계로 판정. (판정, 최대 total)
+
+    🔴 **'거부'와 '측정실패'는 다르다.** 초판은 `ok` 가 아닌 결과를 전부 '거부'로 접었다.
+       쿼터 소진(22)·키 오류(30·31)·네트워크 실패는 **이 이름의 성질과 무관**한데도
+       '거부'로 기록되어, 그 표를 보고 화이트리스트를 고치면 동작하는 항목이 영구히 막힌다.
+       → 종결코드는 즉시 중단(ProbeAborted), 망·파싱 실패는 '측정실패'로 남긴다. 처방이 셋 다 다르다.
+    """
     best = -1
-    rejected_every_time = True
+    saw_rejection = False      # ERR04 처럼 '이 이름이 거부됐다'는 신호를 실제로 봤는가
     for word in PROBE_WORDS:
         for _ in range(ATTEMPTS):
             st, total = _get(dbname, f"{field},{word}")
             if st == "ok":
-                rejected_every_time = False
                 best = max(best, total)
                 break
+            if st.startswith("ERR"):
+                code = st[3:].strip().zfill(2)
+                if code in TERMINAL_CODES:
+                    raise ProbeAborted(
+                        f"종결코드 {code} 를 만나 발견법을 중단한다 "
+                        f"(dbname={dbname}, 항목={field}). 남은 후보를 '거부'로 "
+                        f"기록하면 화이트리스트가 오염된다.")
+                saw_rejection = True
         if best > 0:
             break                      # 하나라도 결과가 나오면 '동작'으로 확정
-    if rejected_every_time:
-        return "거부", -1
+    if best < 0:
+        return ("거부" if saw_rejection else "측정실패"), -1
     return ("동작" if best > 0 else "항상0건"), max(best, 0)
 
 
@@ -122,13 +137,22 @@ def discover(dbname: str) -> None:
     if not unlisted:
         p("   → 목록이 관측 어휘를 모두 덮는다")
         return
-    found = []
+    found, unmeasured = [], []
     for field in unlisted:
         verdict, total = classify(dbname, field)
-        mark = {"동작": "🔴 동작", "항상0건": "· 항상0건", "거부": "  거부"}[verdict]
+        # ⚠️ '측정실패'가 빠져 있으면 여기서 KeyError 로 죽는다 — 판정 범주를 늘릴 때
+        #    같이 늘릴 것. get() 이 아니라 명시적으로 둔다(빠뜨림을 조용히 넘기지 않는다).
+        mark = {"동작": "🔴 동작", "항상0건": "· 항상0건",
+                "거부": "  거부", "측정실패": "?? 측정실패"}[verdict]
         p(f"   {mark:<10} {field:<18} " + (f"최대 total={total:,}" if total > 0 else ""))
         if verdict == "동작":
             found.append((field, total))
+        elif verdict == "측정실패":
+            unmeasured.append(field)
+    if unmeasured:
+        # 조용한 절단 금지 — '거부'로 뭉개면 다음 사람이 측정된 사실로 읽는다.
+        p(f"   ⚠️ 측정하지 못한 항목 {len(unmeasured)}개(망·파싱 실패) — "
+          f"거부가 아니다: {', '.join(unmeasured)}")
     if found:
         p(f"   ⚠️ **목록에 없는데 동작하는 항목 {len(found)}개** — DB_CATEGORIES 에 추가할 것:")
         p(f"      {', '.join(f for f, _ in found)}")

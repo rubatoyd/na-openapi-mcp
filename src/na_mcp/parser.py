@@ -274,6 +274,20 @@ def parse_toc_response(body: str | bytes) -> tuple[str, dict[str, Any]]:
     root = _to_root(body)
     _check_error_envelope(root)
 
+    # 🔴 검색·상세 파서에는 있는 이 검사가 **여기에만 빠져 있었다**(적대적 리뷰 지적, 실측 확인).
+    #    `_check_error_envelope` 는 게이트웨이 봉투(루트가 `<OpenAPI_ServiceResponse>`)만 본다.
+    #    그런데 루트가 `<response>` 인 채 `resultCode` 만 비정상인 응답이 실재한다
+    #    (tests.samples.ECHO_KEY_ERR = 코드 10). 그 응답에는 `<toc>` 가 없으므로
+    #    초판은 **오류를 '목차 없음'으로 조용히 바꿔** 돌려줬다 — 이 저장소가 막겠다고 한
+    #    실패 양식 그대로다. 대량 보강에서는 실패 전건이 '목차 없는 자료'로 굳는다.
+    result_code = (root.findtext("./header/resultCode") or "").strip()
+    if result_code and result_code not in ("00", "0"):
+        msg = (root.findtext("./header/resultMsg") or "").strip()
+        hint = ERROR_CODE_HINTS.get(result_code.zfill(2), "")
+        raise ApiError(result_code.zfill(2),
+                       scrub(f"국회도서관 API 오류 [{result_code}] {msg}"
+                             + (f" — {hint}" if hint else "")))
+
     raw = root.findtext("./toc") or ""       # 위치가 아니라 태그명으로 찾는다
     toc = _TAG.sub("", _BLOCK.sub("\n", raw))
     # 항목마다 `<p>` 가 2개씩 붙어 빈 줄이 생긴다 — 연속 빈 줄만 하나로 접는다.

@@ -19,7 +19,9 @@ import xml.etree.ElementTree as ET
 sys.path.insert(0, __file__.rsplit("\\", 1)[0].rsplit("/", 1)[0])
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'src'))
 
-from probe_api import fetch, p  # noqa: E402
+from probe_api import ProbeAborted, fetch, p  # noqa: E402
+
+from na_mcp.parser import TERMINAL_CODES  # noqa: E402
 
 BASIC = "https://apis.data.go.kr/9720000/searchservice/basic"
 DETAIL = "https://apis.data.go.kr/9720000/searchservice/detail"
@@ -260,10 +262,19 @@ ATTEMPTS = 3
 #    이미 걸러진 목록을 다시 확인할 뿐이라, 문서가 말하는 '문서에 있으나 거부되는 25개'를
 #    재관측할 수 없고 `지식공유`(후보 0개)는 **호출 0회**로 '없음' 판정이 난다.
 #    → 문서 목록(DISPLAY_ONLY_FIELDS 포함)과 타 dbname 어휘까지 후보에 넣는다.
-#    ⚠️ 그래도 '목록에 없는데 동작하는 이름'은 이 방법으로 못 찾는다(국회회의록/발행자 실례).
-#       완전한 발견에는 어휘 사전이 필요하다 — 한계를 알고 쓸 것.
+#
+# 🔴 이 함수는 **NameError 로 죽어 있었다** — `DB_CATEGORIES` 를 임포트하지 않은 채 쓰고
+#    있었고(그 이름은 `probe_categories()` 안에서만 지역 임포트됐다), 그래서
+#    `probe_limits.py categories` 는 호출 즉시 터졌다. 위의 '풀 광역화'는 한 번도 실행된 적이 없다.
+#    CLAUDE.md §F-3 이 `DB_CATEGORIES` 를 "전수 실측값, 재현 가능"이라 적어 둔 근거가
+#    이 경로인데 그 경로가 끊겨 있었다. 회귀 테스트로 고정한다(tests/test_review_fixes.py).
+# ⚠️ 과거 이 자리에 "'목록에 없는데 동작하는 이름'은 못 찾는다(국회회의록/발행자 실례)"고
+#    적혀 있었으나 **그 예는 틀렸다**. `발행자` 는 `_BOOKISH` 에 있어 위의 '타 자료종 어휘'로
+#    이미 후보에 들어오고, `scripts/probe_discover.py` 는 아예 관측 필드명을 후보로 쓴다.
+#    (`EMPTY_FIELDS_BY_DB["국회회의록"]` 의 `발행자` 는 검색항목이 아니라 **응답 필드**다.)
+#    남는 진짜 한계는 "어떤 dbname 어휘에도 없고 응답에도 안 나타나는 이름"뿐이다.
 def _candidate_pool(db: str) -> list[str]:
-    from na_mcp.config import DISPLAY_ONLY_FIELDS
+    from na_mcp.config import DB_CATEGORIES, DISPLAY_ONLY_FIELDS
     pool = list(DB_CATEGORIES.get(db, ())) + list(EXTRA_CANDIDATES.get(db, ()))
     pool += list(DISPLAY_ONLY_FIELDS)
     for other in DB_CATEGORIES.values():      # 타 자료종 어휘도 넣어 대칭 가정을 깬다
@@ -279,17 +290,30 @@ EXTRA_CANDIDATES = {
 
 
 def _category_ok(db: str, cat: str) -> bool:
-    """항목이 유효한가. ERR04 는 간헐적이므로 ATTEMPTS 회 시도해 한 번이라도 통과하면 유효."""
+    """항목이 유효한가. ERR04 는 간헐적이므로 ATTEMPTS 회 시도해 한 번이라도 통과하면 유효.
+
+    🔴 **종결코드를 '거부'로 접으면 안 된다.** 초판은 루트가 `<response>` 가 아니면 전부
+       False 로 돌려줬는데, 쿼터 소진(22)·키 오류(30·31)는 **항목의 성질과 무관**하다.
+       측정 도중 쿼터가 끊기면 그 시점 이후의 후보가 전부 '거부'로 확정되고, 그 표가
+       그대로 화이트리스트가 된다 — 동작하는 항목을 영구히 막는다.
+       → 종결코드를 보면 즉시 `ProbeAborted` 로 멈춘다. 오염된 표보다 중단이 낫다.
+    """
     for _ in range(ATTEMPTS):
         time.sleep(THROTTLE)
         r = fetch(DETAIL, {"pageno": 1, "displaylines": 1, "dbname": db,
                            "search": f"{cat},{CATEGORY_PROBE_WORD}"}, key_mode="encoded")
         if r.get("ok") and r["status"] == 200:
             try:
-                if ET.fromstring(r["body"]).tag == "response":
-                    return True
+                root = ET.fromstring(r["body"])
             except ET.ParseError:
-                pass
+                continue
+            if root.tag == "response":
+                return True
+            code = (root.findtext(".//returnReasonCode") or "").strip().zfill(2)
+            if code in TERMINAL_CODES:
+                raise ProbeAborted(
+                    f"종결코드 {code} 를 만나 측정을 중단한다 (dbname={db}, 항목={cat}). "
+                    f"이 뒤의 후보를 '거부'로 기록하면 화이트리스트가 오염된다.")
     return False
 
 
@@ -306,17 +330,35 @@ def probe_categories(only=None):
     p(f"=== dbname × 검색항목 전수 실측 (실패 시 {ATTEMPTS}회 재시도, kwd={CATEGORY_PROBE_WORD}) ===")
     p("🔑 ERR04(재시도 후에도) = 항목 거부 / total=N(0 포함) = 항목 유효")
     verified = {}
-    for db in dbs:
+    aborted_at = None
+    for i, db in enumerate(dbs):
         cands = _candidate_pool(db)
-        ok = [c for c in cands if _category_ok(db, c)]
-        bad = [c for c in cands if c not in ok]
+        ok, bad = [], []
+        try:
+            for c in cands:
+                (ok if _category_ok(db, c) else bad).append(c)
+        except ProbeAborted as e:
+            # 🔴 여기서 계속 돌면 남은 후보가 전부 '거부'로 기록된다. 멈추고 **어디까지
+            #    측정했는지**를 밝힌다 — 부분 결과를 전체 결과로 착각하는 것이 이 실패의 본질이다.
+            aborted_at = (db, len(ok) + len(bad), len(cands), str(e))
+            verified[db] = ok
+            p(f"  {db}  ⛔ 중단 — {len(ok) + len(bad)}/{len(cands)} 후보까지만 측정됨")
+            break
         verified[db] = ok
         p(f"  {db}")
         p(f"     OK  {', '.join(ok) if ok else '(없음 — dbname 자체가 무효일 수 있다)'}")
         if bad:
             p(f"     NO  {', '.join(bad)}")
     p("")
-    p("-- config.DB_CATEGORIES 에 넣을 실측 결과 --")
+    if aborted_at:
+        db, done, total, why = aborted_at
+        p("🔴 측정이 중단됐다 — 아래 결과는 **부분값이다. 그대로 config 에 넣지 말 것.**")
+        p(f"   사유: {why}")
+        p(f"   미측정 dbname: {', '.join(dbs[dbs.index(db) + 1:]) or '(없음)'}")
+        p(f"   부분 측정 dbname: {db} ({done}/{total} 후보)")
+        p("")
+    p("-- config.DB_CATEGORIES 에 넣을 실측 결과 --"
+      + (" (⚠️ 부분값)" if aborted_at else ""))
     for db, cats in verified.items():
         p(f'    "{db}": {tuple(cats)!r},')
     return verified

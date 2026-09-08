@@ -29,6 +29,16 @@ load_dotenv(override=False)
 TIMEOUT = 20
 
 
+class ProbeAborted(RuntimeError):
+    """계속 측정하면 **결과가 오염되는** 상황 — 쿼터 소진(22)·키 오류(30·31) 등.
+
+    🔴 탐침의 판정은 "이 이름이 거부됐다"인데, 종결코드는 이름의 성질과 무관하다.
+       둘을 같은 False 로 접으면 쿼터가 끊긴 시점 이후의 후보가 **전부 '거부'로 확정**되고,
+       그 결과가 그대로 `config.DB_CATEGORIES` 화이트리스트로 들어간다.
+       측정을 멈추는 편이 오염된 표를 얻는 것보다 낫다.
+    """
+
+
 # ── 인증키 취급 ───────────────────────────────────────────────────────────────
 # data.go.kr 은 "일반 인증키"를 Encoding/Decoding 두 벌로 준다.
 #   Decoding = 원문(+ / = 포함)      → requests 의 params= 로 넘긴다(requests 가 인코딩).
