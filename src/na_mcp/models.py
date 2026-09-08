@@ -31,7 +31,14 @@ COLUMNS = [
     "isbn", "issn", "language", "db_name", "location", "source_info",
     "degree", "university", "major",
     "committee", "status", "assembly_term", "meeting",
-    "has_toc", "has_abstract", "has_fulltext", "has_audio", "copyright_ok",
+    # ⚠️ `toc_status`·`toc_chars` 는 `has_toc` **바로 뒤**에 둔다. `has_toc` 는 검색이 준
+    #    Y/N 플래그이고 `toc_status` 는 실제로 받아본 결과다 — 둘이 어긋나는 행
+    #    (`has_toc=Y` 인데 `toc_status=empty`)이 가장 중요한 사실이라 나란히 보여야 한다.
+    #    🔴 목차 **본문**(`toc_text`)은 여기 넣지 않는다: 수천 자라 xlsx 셀 상한(32,767)에
+    #    걸리고 csv 를 비대하게 만들며 MCP 미리보기 50건이 컨텍스트를 통째로 태운다.
+    #    본문은 json·sqlite 로만 나간다(`to_row()` 가 COLUMNS 만 보므로 자동으로 빠진다).
+    "has_toc", "toc_status", "toc_chars",
+    "has_abstract", "has_fulltext", "has_audio", "copyright_ok",
     "detail_url", "placeholder_fields",
 ]
 
@@ -162,7 +169,11 @@ class Record:
     university: str = ""
     major: str = ""
     advisor: str = ""
-    has_toc: str = ""        # 목차 Y/N
+    has_toc: str = ""        # 목차 Y/N — 검색이 **준** 플래그다(실제로 받아본 결과가 아니다)
+    # ── 목차 보강 결과 (na_collect(toc_max=...) 를 켰을 때만 채워진다) ──────
+    toc_status: str = ""     # config.TOC_STATUS_VALUES 중 하나. 빈칸 = 보강 미실행
+    toc_chars: int = 0       # 확보한 본문 길이. has_toc=Y 인데 0 이면 플래그가 거짓이었다
+    toc_text: str = ""       # 🔴 COLUMNS 에 없다 — json·sqlite 로만 나간다(위 주석 참조)
     has_abstract: str = ""   # 초록유무 Y/N
     has_fulltext: str = ""   # 원본DB유무 Y/N
     has_audio: str = ""      # 음성지원유무 Y/N

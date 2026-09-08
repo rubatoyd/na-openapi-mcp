@@ -29,6 +29,8 @@ from .config import (
     SEARCH_BASIC_URL,
     SEARCH_DETAIL_URL,
     TOC_ALWAYS_EMPTY_DBNAMES,
+    TOC_ENRICH_ATTEMPTS,
+    TOC_ENRICH_CONSECUTIVE_FAIL_ABORT,
     TOC_URL,
     build_url,
     scrub,
@@ -52,6 +54,16 @@ log = logging.getLogger("na_mcp")
 class NaError(RuntimeError):
     """네트워크·HTTP·파싱을 아우르는 클라이언트 오류 (인증키는 절대 싣지 않는다)."""
 
+    code: str = ""          # 알려진 경우의 API 오류코드
+    terminal: bool = False  # 재시도·계속 진행이 무의미한가(쿼터·키 문제)
+
+
+def _coded(err: NaError, code: str, *, terminal: bool) -> NaError:
+    """오류에 코드를 붙여 돌려준다 — 호출자가 '중단할 것'과 '건별 실패'를 구분하도록."""
+    err.code = (code or "").strip()
+    err.terminal = terminal
+    return err
+
 
 class NaClient:
     def __init__(self, *, throttle: float = 0.4, timeout: int = 30,
@@ -65,6 +77,7 @@ class NaClient:
         self._session.headers["User-Agent"] = (
             f"na-openapi-mcp/{__version__} (+https://github.com/rubatoyd/na-openapi-mcp)")
         self._last_call = 0.0
+        self._calls = 0         # 이 클라이언트가 실제로 태운 HTTP 호출 수(재시도 포함)
 
     # ── 저수준 ───────────────────────────────────────────────────────────────
     def _sleep(self) -> None:
@@ -88,6 +101,10 @@ class NaClient:
         ⚠️ requests 예외도 **타입만** 남긴다 — 본문에 URL 이 실린다.
         """
         self._sleep()
+        # 🔴 **쿼터 회계의 진실값.** 보강 통계의 `api_calls` 를 '시도 건수'로 추정하면
+        #    `_lookup` 내부 재시도가 호출자에게 보이지 않아 실제보다 적게 보고된다.
+        #    여기서 세면 추정이 아니라 실측이다.
+        self._calls += 1
         url = build_url(endpoint, params)       # 인증키 결합은 여기 한 곳에서만
         try:
             resp = self._session.get(url, timeout=self.timeout)
@@ -297,6 +314,9 @@ class NaClient:
         axes: list[dict] = []
         stopped_early = False
         unsearched: list[str] = []
+        # 검색어 하나당 회수 한계. `search_meta` 의 계산과 **같은 식**이어야 한다.
+        term_record_cap = PAGENO_MAX * min(max(1, page_size or MAX_DISPLAYLINES),
+                                           MAX_DISPLAYLINES)
 
         for i, term in enumerate(terms):
             remaining = max_records - len(merged)
@@ -336,7 +356,11 @@ class NaClient:
             "stopped_early": stopped_early, "terms_unsearched": unsearched,
             "cap_hit_terms": [a["term"] for a in axes if a["cap_hit"]],
             "incomplete_terms": [a["term"] for a in axes if a["failed_pages"]],
-            "api_record_cap": API_RECORD_CAP,
+            # 🔴 상수 `API_RECORD_CAP`(=99×1000) 을 그대로 실으면 **거짓 보고**다.
+            #    회수 한계는 `PAGENO_MAX × page_size` 라 page_size 를 낮추면 함께 낮아진다.
+            #    `search_meta` 는 이미 계산값을 쓰는데(cap_hit 판정도 그 값으로 한다)
+            #    합집합 경로만 상수로 남아 있었다 — 같은 결함을 한 곳만 고친 것이었다.
+            "api_record_cap": term_record_cap,
         }
         if stopped_early:
             # 🔴 `max_records` 는 **검색어 전체에 걸친 예산**이라 앞 검색어가 다 써버리면
@@ -356,7 +380,7 @@ class NaClient:
                 meta[key] = f"[{', '.join(hits)}] {sample}"
         if meta["cap_hit_terms"]:
             meta["cap_note"] = (
-                f"다음 검색어가 회수 한계({API_RECORD_CAP:,}건)에 걸렸습니다 — 전수가 아닙니다: "
+                f"다음 검색어가 회수 한계({term_record_cap:,}건)에 걸렸습니다 — 전수가 아닙니다: "
                 f"{', '.join(meta['cap_hit_terms'])}")
         if meta["incomplete_terms"]:
             meta["incomplete_note"] = (
@@ -367,7 +391,8 @@ class NaClient:
         return self.search_terms_meta(terms, **kw)[0]
 
     # ── 상세정보 · 목차 (detailinfoservice — data.go.kr 15098175 별도 활용신청) ──
-    def _lookup(self, endpoint: str, controlno: str, parse, *, what: str):
+    def _lookup(self, endpoint: str, controlno: str, parse, *, what: str,
+                attempts: int | None = None):
         """제어번호 1건 조회 공통부.
 
         🔴 **없는 제어번호도 `ERR04` 로 온다**(실측) — 전용 '자료 없음' 코드가 없다.
@@ -378,7 +403,9 @@ class NaClient:
         cn = (controlno or "").strip()
         if not cn:
             raise NaError("controlno 가 비었습니다 — 검색 결과의 `제어번호` 를 넣으세요.")
-        attempts = min(2, self.max_retries)
+        # ⚠️ 대량 보강은 `attempts=1` 로 부른다 — 견적이 곧 상한이 되어야 가드가
+        #    거짓말을 하지 않는다(config.TOC_ENRICH_ATTEMPTS 의 주석 참조).
+        attempts = min(attempts if attempts else 2, self.max_retries)
         last: Exception | None = None
         for attempt in range(attempts):
             try:
@@ -386,17 +413,20 @@ class NaClient:
             except ApiError as e:
                 last = e
                 if not e.retryable:
-                    raise NaError(str(e)) from None
+                    # 🔴 코드를 버리면 호출자가 '쿼터 소진'과 '제어번호 오류'를 구분 못 한다.
+                    #    보강 루프는 종결코드를 만나면 **남은 예산을 태우지 않고 중단**해야 한다.
+                    raise _coded(NaError(str(e)), e.code, terminal=True) from None
                 log.warning("%s 조회 일시 오류 [%s] — 재시도 %d/%d",
                             what, e.code, attempt + 1, attempts)
             except (ParseError, NaError) as e:
                 last = e
             if attempt < attempts - 1:
                 time.sleep(self.throttle * 2 + 0.3)
-        raise NaError(scrub(
+        raise _coded(NaError(scrub(
             f"{what} 조회 실패(controlno={cn}): {last}. "
             f"⚠️ 이 API 는 **존재하지 않는 제어번호도 ERR04 로 응답한다**(실측) — "
-            f"일시 오류와 구분되지 않으므로 제어번호를 먼저 확인하세요."))
+            f"일시 오류와 구분되지 않으므로 제어번호를 먼저 확인하세요.")),
+            getattr(last, "code", ""), terminal=False)
 
     def detail(self, controlno: str) -> tuple[dict[str, str], dict[str, Any]]:
         """상세정보 항목조회.
@@ -415,3 +445,96 @@ class NaClient:
            헛호출(과 쿼터 낭비)을 줄일 수 있다.
         """
         return self._lookup(TOC_URL, controlno, parse_toc_response, what="목차")
+
+    # ── 목차 대량 보강 ───────────────────────────────────────────────────────
+    def enrich_toc(self, records: list[Record], limit: int, *,
+                   dbname: str | None = None) -> dict[str, Any]:
+        """레코드 목록에 목차 본문을 채워 넣고 **회계를 돌려준다**(레코드는 제자리 수정).
+
+        🔴 이 함수의 설계 원칙은 하나다 — **부분 성공이 반드시 읽혀야 한다.**
+           목차가 안 붙은 행이 생기는 이유가 다섯 가지인데(플래그가 Y 가 아님 / 본문이
+           실제로 없음 / 센티널 / 조회 실패 / 예산 소진) **처방이 전부 다르다.**
+           같은 빈칸으로 섞으면 호출자는 '이 자료에는 목차가 없다'고 오인한다.
+           → 레코드마다 `toc_status` 를 남기고, 집계는 사유별로 나눠 보고한다.
+
+        비용: 후보 1건당 **정확히 1회**(재시도 없음). 견적이 곧 상한이다.
+        """
+        st: dict[str, Any] = {
+            "limit": int(limit), "candidates": 0, "attempted": 0, "api_calls": 0,
+            "ok": 0, "empty": 0, "sentinel": 0, "failed": 0,
+            "skipped_flag": 0, "skipped_no_controlno": 0, "not_attempted": 0,
+            "failed_controlnos": [], "failed_total": 0,
+            "budget_hit": False, "aborted": None, "skip_reason": None,
+        }
+        calls_before = self._calls
+
+        # ⚠️ dbname 은 collect 인자로만 알 수 있다 — 통합검색 결과 레코드에는 DB 필드가
+        #    거의 없다(실응답 100건 표본에 없었다). 그래서 이 규칙은 dbname 지정 수집에만 걸린다.
+        if dbname and dbname in TOC_ALWAYS_EMPTY_DBNAMES:
+            st["skip_reason"] = "dbname_toc_always_empty"
+            for r in records:
+                r.toc_status = "skipped"
+            return st
+
+        # 0원 필터 — 호출 없이 후보를 좁힌다. 예산을 유효 후보에 몰아주는 장치다.
+        # ⚠️ `목차` 필드가 **아예 없는** 자료종(표,그림DB·전자저널·국회회의록 등)에서는
+        #    has_toc 가 'N' 이 아니라 **빈 문자열**이다. `!= "Y"` 판정이라 자동으로 걸러진다 —
+        #    dbname 목록에 의존하지 않는 것이 이 규칙을 1차로 두는 이유다.
+        candidates: list[Record] = []
+        for r in records:
+            if r.has_toc.strip().upper() != "Y":
+                r.toc_status = "skipped"
+                st["skipped_flag"] += 1
+            elif not (r.control_no or "").strip():
+                r.toc_status = "skipped"
+                st["skipped_no_controlno"] += 1
+            else:
+                candidates.append(r)
+        st["candidates"] = len(candidates)
+
+        consecutive_fail = 0
+        for i, r in enumerate(candidates):
+            if i >= st["limit"]:
+                st["budget_hit"] = True
+                break
+            try:
+                text, _env = self._lookup(TOC_URL, r.control_no, parse_toc_response,
+                                          what="목차", attempts=TOC_ENRICH_ATTEMPTS)
+            except NaError as e:
+                st["attempted"] += 1
+                if getattr(e, "terminal", False):
+                    # 쿼터·키 문제 — 남은 예산을 태워봐야 전부 실패한다. 즉시 멈춘다.
+                    st["aborted"] = {"reason": "terminal_error", "code": e.code or "?"}
+                    break
+                st["failed"] += 1
+                st["failed_total"] += 1
+                if len(st["failed_controlnos"]) < 20:
+                    st["failed_controlnos"].append(r.control_no)
+                r.toc_status = "failed"
+                consecutive_fail += 1
+                if consecutive_fail >= TOC_ENRICH_CONSECUTIVE_FAIL_ABORT:
+                    st["aborted"] = {"reason": "consecutive_failures",
+                                     "count": consecutive_fail}
+                    break
+                continue
+            st["attempted"] += 1
+            consecutive_fail = 0
+            if text:
+                r.toc_text, r.toc_chars, r.toc_status = text, len(text), "ok"
+                st["ok"] += 1
+            elif _env.get("toc_sentinel"):
+                # 본문이 `목차정보없음` 의 반복 — 실패가 아니고 '없음'과도 다르다.
+                r.toc_status = "sentinel"
+                st["sentinel"] += 1
+            else:
+                # 정상 응답인데 본문이 없다 = 검색이 준 `목차=Y` 플래그가 거짓이었다.
+                r.toc_status = "empty"
+                st["empty"] += 1
+
+        # 부르지 못하고 남은 후보 — 이것을 세지 않으면 '전부 처리했다'로 읽힌다.
+        pending = [r for r in candidates if not r.toc_status]
+        for r in pending:
+            r.toc_status = "not_attempted"
+        st["not_attempted"] = len(pending)
+        st["api_calls"] = self._calls - calls_before
+        return st

@@ -41,8 +41,10 @@ def to_json(records: Sequence[Record], path: str) -> None:
     `placeholder_fields` 는 값 자리에 안내문이 와서 정규화 필드를 비운 항목이다
     (E-BOOK 의 DDC 등). 빈 값이 '미입력'인지 '안내문'인지 구분하려면 필요하다.
     """
+    # `toc_text` 는 COLUMNS 밖이라 `to_row()` 에 없다 — 본문이 나가는 두 형식 중 하나가 여기다.
     data = [{**r.to_row(), "raw": r.raw,
-             "placeholder_fields": r.placeholder_fields} for r in records]
+             "placeholder_fields": r.placeholder_fields,
+             "toc_text": r.toc_text} for r in records]
     Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -70,13 +72,15 @@ def to_sqlite(records: Sequence[Record], path: str, *, table: str = "records") -
     try:
         cols = ", ".join(f'"{c}" TEXT' for c in COLUMNS)
         con.execute(f"DROP TABLE IF EXISTS {table}")  # 스냅샷: 재실행 시 누적 방지
-        con.execute(f'CREATE TABLE {table} ({cols}, "raw" TEXT)')
-        ph = ", ".join(["?"] * (len(COLUMNS) + 1))
+        # `toc_text` 는 COLUMNS 밖이다(표에 싣기엔 크다) — 본문이 나가는 두 형식 중 하나가 여기다.
+        con.execute(f'CREATE TABLE {table} ({cols}, "raw" TEXT, "toc_text" TEXT)')
+        ph = ", ".join(["?"] * (len(COLUMNS) + 2))
         for r in records:
             row = r.to_row()
             con.execute(
-                f'INSERT INTO {table} ({", ".join(COLUMNS)}, raw) VALUES ({ph})',
-                [row.get(c, "") for c in COLUMNS] + [json.dumps(r.raw, ensure_ascii=False)],
+                f'INSERT INTO {table} ({", ".join(COLUMNS)}, raw, toc_text) VALUES ({ph})',
+                [row.get(c, "") for c in COLUMNS]
+                + [json.dumps(r.raw, ensure_ascii=False), r.toc_text],
             )
         con.commit()
     finally:

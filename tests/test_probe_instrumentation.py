@@ -120,6 +120,33 @@ def test_classify_zero_hit_is_not_rejection(monkeypatch):
     assert pd.classify("일반도서", "청구기호")[0] == "항상0건"
 
 
+def test_rejection_costs_three_calls_not_nine(monkeypatch):
+    """🔴 거부 1건당 9회(검색어 3 × 재시도 3)를 태우던 것이 전수 스윕 비용의 절반이었다.
+
+    항목 거부는 **검색어와 무관**하다는 것이 이미 실측이므로, 검색어를 바꿔가며
+    재시도할 근거가 없다. 첫 검색어가 재시도 끝에 거부되면 거기서 확정한다.
+    """
+    pd = _load("probe_discover")
+    calls = []
+    monkeypatch.setattr(pd, "_get", lambda db, se, rows=1: (calls.append(se), ("ERR04", -1))[1])
+    verdict, _ = pd.classify("일반도서", "없는항목")
+    assert verdict == "거부"
+    assert len(calls) == pd.ATTEMPTS == 3
+
+
+def test_display_only_fields_are_excluded_from_discovery(monkeypatch):
+    """표시 전용 이름은 이미 거부로 실측됐다 — 후보에 남기면 자료종마다 헛호출이 나간다."""
+    pd = _load("probe_discover")
+    from na_mcp.config import DISPLAY_ONLY_FIELDS
+    observed = ["발행년도", "학위구분", "새로운이름"]      # 앞 둘은 표시 전용
+    monkeypatch.setattr(pd, "observed_field_names", lambda db: observed)
+    tested = []
+    monkeypatch.setattr(pd, "classify", lambda db, f: (tested.append(f), ("거부", -1))[1])
+    pd.discover("일반도서")
+    assert tested == ["새로운이름"]
+    assert {"발행년도", "학위구분"} <= set(DISPLAY_ONLY_FIELDS)
+
+
 def test_discover_verdict_marks_cover_every_verdict():
     """판정 범주를 늘리고 표시 표를 안 늘리면 KeyError 로 죽는다 — 실제로 그럴 뻔했다."""
     src = (SCRIPTS / "probe_discover.py").read_text(encoding="utf-8")

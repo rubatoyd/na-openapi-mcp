@@ -58,6 +58,9 @@
 | `zero_yield_warning` | 수락되지만 **항상 0건**인 검색항목 | 다른 항목 사용 |
 | `option_ignored_warning` | 연도 필터가 **무시됨**(통합검색) | `dbname` 함께 지정 |
 | `ignored_search_warning` | 전체 카탈로그 규모가 반환됨 | 검색항목 확인 |
+| `toc_enrich_truncated_note` | 목차 후보 중 **일부만** 보강됨 | `toc_max` 상향 |
+| `toc_enrich_incomplete_note` | 목차 **조회 실패** 건이 있음 | 상향은 무의미 — 제어번호 확인 |
+| `toc_enrich_aborted_note` | 쿼터·키 문제로 보강 **중단** | 상향은 오히려 악화 — `na_status` |
 
 **회수 한계는 `pageno 최대 99 × page_size`** 입니다(실측). 기본값(1000)이면 99,000건이고,
 `page_size` 를 낮추면 한계도 함께 낮아집니다 — 이 서버는 그것까지 반영해 보고합니다.
@@ -147,7 +150,7 @@ NA_OS_TRUST=1                  # 교육망·사내망 SSL 인터셉션 대응(�
 |---|---|
 | `na_status` | 인증키 보유 여부 + 실제 왕복 1회 |
 | `na_search` | 자료검색. 절단 신호를 함께 반환 |
-| `na_collect` | 검색어 **합집합** 수집 → xlsx/csv/json/sqlite |
+| `na_collect` | 검색어 **합집합** 수집 → xlsx/csv/json/sqlite. `toc_max` 로 목차 본문 보강(기본 끔) |
 | `na_detail` | 제어번호 1건 상세정보 |
 | `na_toc` | 제어번호 1건 목차 |
 | `na_fields` | 검색항목·dbname 유효값 + 실측 근거(census) |
@@ -179,6 +182,9 @@ na fields                          # 검색항목·dbname 유효값 (--json 으�
 na search "전체,교육불평등" --max-records 20
 na search "저자명,양연동" --dbname 학위논문
 na collect --terms "전체,교육불평등" "전체,교육격차" --max-records 2000
+
+# 목차 본문까지 붙이기 — 건당 1회를 더 씁니다(기본 꺼져 있음). 본문은 json·sqlite 에만.
+na collect --search "자료명,교육불평등" --dbname 일반도서 --toc-max 300 --formats json xlsx
 na detail MONO12026000012887
 na toc    MONO12026000012887
 
@@ -206,11 +212,29 @@ na search "자료명,교육" --dbname 일반도서 --option "발행년도,2000|�
   국회의안정보(`제안이유 및 주요내용`)·국회회의록(`내용`)에만 있습니다.
 - **목차가 전건 없는 자료종**: E-BOOK · 학술지,잡지 · 신문 · 국외기사 · 동영상자료.
 
+### 목차 보강(`toc_max`)을 켰을 때
+
+목차가 안 붙는 이유가 다섯이고 **처방이 전부 다릅니다.** 같은 빈칸으로 섞으면 "이 자료에는
+목차가 없다"는 잘못된 결론이 나오므로, `toc_status` 컬럼이 사유를 행 단위로 구분합니다.
+
+| `toc_status` | 뜻 | 처방 |
+|---|---|---|
+| `ok` | 본문 확보 | — |
+| `skipped` | `목차` 플래그가 `Y` 가 아니거나 제어번호 없음 — **호출하지 않음** | — (쿼터를 쓰지 않음) |
+| `empty` | 정상 응답인데 본문이 없음 → **플래그가 거짓이었다** | — |
+| `sentinel` | 본문이 `목차정보없음` 반복 | — |
+| `failed` | 조회 실패 | `na_toc` 로 단건 재조회 |
+| `not_attempted` | 예산 소진·중단으로 못 부름 | `toc_max` 상향 |
+
+`has_toc='Y'` 인데 `toc_status='empty'` 인 행이 가장 중요한 신호라 두 컬럼을 나란히 둡니다.
+**본문(`toc_text`)은 json·sqlite 에만** 실립니다 — 수천 자라 xlsx 셀 상한(32,767)에 걸리고
+csv 를 비대하게 만듭니다.
+
 ---
 
 ## 검증 상태
 
-- **회귀 테스트 185건.** 파서·수집기뿐 아니라 **측정 도구 자체**도 고정합니다
+- **회귀 테스트 209건.** 파서·수집기뿐 아니라 **측정 도구 자체**도 고정합니다
   (`tests/test_probe_instrumentation.py`) — 화이트리스트가 탐침의 출력이라, 탐침이 조용히
   틀리면 그 오류가 그대로 코드가 되기 때문입니다. CI 는 테스트뿐 아니라 **클라이언트가 실제로 띄울 수 있는지**를
   봅니다 — 신규 의존성 해석에서 `mcp.server.fastmcp` 존재 확인, 실제 stdio 핸드셰이크,

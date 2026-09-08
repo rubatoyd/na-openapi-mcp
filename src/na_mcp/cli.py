@@ -23,6 +23,24 @@ from .config import (
 from .exporters import export
 
 
+def _harden_stdio() -> None:
+    """🔴 한국어 Windows(cp949)에서 출력을 파이프·파일로 넘기면 **CLI 가 죽는다**.
+
+    이 저장소의 출력에는 `✗`·`⚠️`·`·` 같은 문자가 섞여 있고, `—`(U+2014)는 cp949 에
+    아예 없다(cp949 는 U+2015 를 쓴다). 콘솔에 직접 찍을 때는 넘어가지만
+    `na collect --help > out.txt` 처럼 리다이렉트하면 인코딩이 cp949 로 잡혀
+    `UnicodeEncodeError` 로 **종료코드 1**이 된다(실측).
+
+    문자 하나 때문에 도구 전체가 못 도는 것은 과하다. **인코딩은 바꾸지 않는다** —
+    바꾸면 콘솔에 한글이 깨져 나온다. 대체 문자만 허용해 죽지 않게 한다.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")   # type: ignore[union-attr]
+        except Exception:                          # noqa: BLE001 — 없으면 그냥 넘어간다
+            pass
+
+
 def _p(*a) -> None:
     print(*a)
 
@@ -105,14 +123,45 @@ def cmd_collect(args) -> int:
                              "year_to": args.year_to,
                              "note": "로컬 후처리 — 회수 한계를 풀어주지 않는다"}
 
+    # 목차 보강 — MCP 경로와 **같은 지점**(로컬 필터 뒤, export 앞)에서 부른다.
+    if getattr(args, "toc_max", 0) and records:
+        st = client.enrich_toc(records, int(args.toc_max), dbname=args.dbname)
+        meta["toc_enrichment"] = st
+        if st["budget_hit"]:
+            meta["toc_enrich_truncated_note"] = (
+                f"목차 후보 {st['candidates']:,}건 중 {st['limit']:,}건만 보강 "
+                f"({st['not_attempted']:,}건 미시도). 처방: --toc-max 를 올리세요.")
+        if st["failed"]:
+            meta["toc_enrich_incomplete_note"] = (
+                f"{st['failed']:,}건 조회 실패 — --toc-max 상향으로는 해결되지 않습니다. "
+                f"실패 제어번호: {', '.join(st['failed_controlnos'][:5])}")
+        if st["aborted"]:
+            meta["toc_enrich_aborted_note"] = (
+                f"보강 중단({st['aborted']}) — 쿼터·인증키를 확인하세요(`na status`).")
+        if st["skip_reason"] == "dbname_toc_always_empty":
+            meta["toc_enrich_skip_note"] = (
+                f"dbname='{args.dbname}' 은 목차가 전건 없는 자료종이라 호출하지 않았습니다.")
+        if not any(f in ("json", "sqlite") for f in args.formats):
+            meta["toc_enrich_output_note"] = (
+                "⚠️ --formats 에 json·sqlite 가 없어 목차 **본문이 저장되지 않습니다** "
+                "(상태 컬럼만 남습니다).")
+
     _p(f"수집 {len(records):,}건 "
        f"(검색어 {len(meta['terms_searched'])}/{len(terms)}개 조회)")
+    if meta.get("toc_enrichment"):
+        st = meta["toc_enrichment"]
+        _p(f"  목차 보강: 확보 {st['ok']:,} · 없음 {st['empty']:,} · 센티널 {st['sentinel']:,}"
+           f" · 실패 {st['failed']:,} · 미시도 {st['not_attempted']:,}"
+           f"  (호출 {st['api_calls']:,}회)")
     for a in meta["axes"]:
         _p(f"  - {a['term']}: total={a['total']:,} 회수={a['fetched']:,} 신규={a['new']:,}"
            + ("  ⚠️ cap_hit" if a["cap_hit"] else ""))
     for note in ("stopped_early_note", "cap_note", "incomplete_note",
                  "ignored_search_warning", "zero_yield_warning",
-                 "option_ignored_warning", "early_stop_note", "toc_note"):
+                 "option_ignored_warning", "early_stop_note", "toc_note",
+                 "toc_enrich_truncated_note", "toc_enrich_incomplete_note",
+                 "toc_enrich_aborted_note", "toc_enrich_skip_note",
+                 "toc_enrich_output_note"):
         if meta.get(note):
             _p(f"⚠️  {meta[note]}")
 
@@ -197,6 +246,7 @@ def cmd_fields(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _harden_stdio()     # argparse 가 help 를 찍기 **전에** 걸어야 한다
     ap = argparse.ArgumentParser(prog="na", description="국회도서관 자료검색 CLI")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -237,6 +287,12 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--out-dir")
     c.add_argument("--name")
     c.add_argument("--no-save", action="store_true")
+    # ⚠️ help 문자열에 `—`(U+2014)·이모지를 쓰지 말 것. cp949 에 없어서 출력을 파이프로
+    #    넘기는 순간 argparse 가 UnicodeEncodeError 로 죽는다(실측: 종료코드 1).
+    #    아래 _harden_stdio() 가 방어하지만, 애초에 넣지 않는 것이 낫다.
+    c.add_argument("--toc-max", type=int, default=0,
+                   help="목차 본문을 붙일 최대 레코드 수 (0=끔). 건당 1회를 더 씁니다. "
+                        "권장 300. 본문은 json/sqlite 에만 실립니다.")
     c.add_argument("--json", action="store_true", help="메타를 JSON 으로 출력")
     common(c)
     c.set_defaults(fn=cmd_collect)

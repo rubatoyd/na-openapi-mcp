@@ -201,9 +201,39 @@ def zero_yield_fields(dbname: str | None, search: str) -> list[str]:
 
 
 # 🔴 `목차` 가 **상수 'N'** 인 자료종 — `na_toc` 호출이 통째로 무의미하다(쿼터만 쓴다).
+# ⚠️ `ALWAYS_ZERO_CATEGORIES`(위)와 **다른 것이다.** 저쪽은 '검색항목이 항상 0건',
+#    이쪽은 '목차 본문이 항상 없음'. 혼동하면 일반도서·고서·웹자료를 통째로 건너뛴다.
 TOC_ALWAYS_EMPTY_DBNAMES = frozenset({
     "E-BOOK", "학술지,잡지", "신문", "국외기사", "동영상자료",
 })
+
+# ── 목차 보강 (`na_collect(toc_max=...)`) ───────────────────────────────────
+# 🔴 비용 구조가 검색과 **극단적으로 비대칭**이다. 검색은 displaylines=1000 이라
+#    1,000건을 1회로 받지만, 목차는 페이징이 없어 1,000건에 1,000회가 든다.
+#    그래서 기본은 off 이고, 켤 때도 상한을 명시적으로 받는다.
+TOC_ENRICH_DEFAULT = 0            # 0 = 끔. 기본값을 바꾸지 말 것 — 켜는 것은 호출자의 결정이다.
+TOC_ENRICH_SUGGESTED = 300        # 권장 자릿값(일일 쿼터의 3%). 상한이 아니라 안내용이다.
+TOC_ENRICH_HARD_CAP = int(os.environ.get("NA_TOC_ENRICH_HARD_CAP", "1000"))
+
+# 🔴 보강은 **건당 정확히 1회**로 고정한다(단건 `na_toc` 의 2회와 다르다).
+#    재시도를 예약하면 사전 견적이 실제 상한의 절반이 되어 **가드가 거짓말을 한다** —
+#    "300건 보강"이 최악 600호출이 되고, 그것을 피하려 상한을 100으로 낮추면 기능이 죽는다.
+#    실패는 재시도로 감추지 않고 `failed` 로 **보고**한다. 처방이 다르기 때문이다
+#    (실패 건은 제어번호를 받아 `na_toc` 단건으로 다시 부르면 된다).
+TOC_ENRICH_ATTEMPTS = 1
+
+# 연속 실패가 이만큼 쌓이면 중단한다 — 서버가 죽었는데 예산을 끝까지 태우지 않기 위해서다.
+TOC_ENRICH_CONSECUTIVE_FAIL_ABORT = int(os.environ.get("NA_TOC_FAIL_ABORT", "10"))
+
+# 레코드의 `toc_status` 가 가질 수 있는 값. **빈칸에 섞지 않는다** — 처방이 전부 다르다.
+#   ""            보강을 실행하지 않음(toc_max=0)
+#   "skipped"     목차 플래그가 'Y' 가 아니거나 제어번호가 없어 **호출하지 않음**
+#   "ok"          본문 확보
+#   "empty"       정상 응답인데 본문이 없음 → 검색이 준 'Y' 플래그가 거짓이었다는 뜻
+#   "sentinel"    본문이 `목차정보없음` 센티널 (parser 가 걸러낸 것)
+#   "failed"      조회 실패 — 예산을 올려도 해결되지 않는다
+#   "not_attempted"  예산 소진·중단으로 부르지 못함 → toc_max 를 올리면 해결된다
+TOC_STATUS_VALUES = ("", "skipped", "ok", "empty", "sentinel", "failed", "not_attempted")
 
 # ⚠️ `displaylines=500` 에서 ConnectionError 로 끊기는 자료종(레코드가 무겁다).
 HEAVY_DBNAMES = {"외국법률번역DB": 200, "표,그림DB": 200}

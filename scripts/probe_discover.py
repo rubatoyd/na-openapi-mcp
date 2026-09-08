@@ -117,6 +117,11 @@ def classify(dbname: str, field: str) -> tuple[str, int]:
                 saw_rejection = True
         if best > 0:
             break                      # 하나라도 결과가 나오면 '동작'으로 확정
+        if saw_rejection:
+            # 🔴 **항목 거부는 검색어와 무관하다**(config.py 의 실측 주석). 그런데 초판은
+            #    검색어 3개 × 재시도 3회 = 거부 1건당 최대 9회를 태웠고, 그것이 전수 스윕
+            #    비용의 절반 이상이었다. 첫 검색어가 재시도 끝에 거부되면 거기서 확정한다.
+            break
     if best < 0:
         return ("거부" if saw_rejection else "측정실패"), -1
     return ("동작" if best > 0 else "항상0건"), max(best, 0)
@@ -131,9 +136,16 @@ def discover(dbname: str) -> None:
     if not observed:
         p(f"\n■ {dbname} — 레코드를 못 받아 건너뜀")
         return
-    unlisted = [n for n in observed if n not in listed]
+    # ⚠️ 표시 전용 이름(`발행년도`·`학위구분` 등)은 **이미 거부로 실측된** 것들이다.
+    #    후보에 남겨 두면 자료종마다 3회씩 헛호출이 나간다. 다만 **조용히 빼지는 않는다** —
+    #    몇 개를 왜 뺐는지 출력한다(측정 범위를 줄인 것을 숨기면 다음 사람이 전수로 오해한다).
+    from na_mcp.config import DISPLAY_ONLY_FIELDS
+    display_only = [n for n in observed if n not in listed and n in DISPLAY_ONLY_FIELDS]
+    unlisted = [n for n in observed if n not in listed and n not in DISPLAY_ONLY_FIELDS]
     p(f"\n■ {dbname}")
     p(f"   목록 {len(listed)}개 / 관측 필드명 {len(observed)}개 / **목록 밖 후보 {len(unlisted)}개**")
+    if display_only:
+        p(f"   (표시 전용이라 시험에서 제외 {len(display_only)}개: {', '.join(display_only)})")
     if not unlisted:
         p("   → 목록이 관측 어휘를 모두 덮는다")
         return

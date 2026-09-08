@@ -27,6 +27,9 @@ from .config import (
     NARRATIVE_TEXT_FIELDS,
     PLACEHOLDER_VALUES,
     TOC_ALWAYS_EMPTY_DBNAMES,
+    TOC_ENRICH_DEFAULT,
+    TOC_ENRICH_HARD_CAP,
+    TOC_ENRICH_SUGGESTED,
     MAX_DISPLAYLINES,
     PAGENO_MAX,
     SEARCH_FIELDS_BASIC,
@@ -61,6 +64,38 @@ def _quota_guard(max_records: int, page_size: int | None, n_terms: int = 1):
                 "page_size 를 키워(최대 1000) 페이지 수를 줄이세요.",
         "estimated_calls": est, "limit": MAX_CALLS_PER_TOOL_CALL,
     }
+
+
+# 🔴 목차 보강은 **검색과 별도 예산**이다. 같은 상한에 합산하면 상한을 올리는 순간
+#    검색 가드까지 함께 풀린다(적대적 심사 지적). 대신 한 도구 호출의 최악값이
+#    검색 300 + 보강 300 = 600회(일일 10,000의 6%)로 **두 배가 된다는 것**을 명시해 둔다.
+#    보강은 기본 off 이므로 켜는 것은 호출자의 명시적 결정이다.
+MAX_TOC_CALLS_PER_TOOL_CALL = int(os.environ.get("NA_MAX_TOC_CALLS_PER_TOOL_CALL", "300"))
+
+
+def _toc_quota_guard(toc_max: int):
+    """보강 예산이 상한을 넘으면 **호출 전에** 거부한다.
+
+    보강은 건당 정확히 1회이므로 `toc_max` 가 곧 최악 호출 수다 — 견적과 실제가 같다.
+    """
+    n = int(toc_max or 0)
+    if n <= 0:
+        return None
+    if n > TOC_ENRICH_HARD_CAP:
+        return {
+            "error": f"toc_max={n:,} 는 하드캡({TOC_ENRICH_HARD_CAP:,})을 넘습니다.",
+            "hint": f"목차는 건당 1회를 씁니다 — 일일 쿼터 10,000건을 생각하세요. "
+                    f"권장 자릿값은 {TOC_ENRICH_SUGGESTED:,} 입니다.",
+        }
+    if n > MAX_TOC_CALLS_PER_TOOL_CALL:
+        return {
+            "error": f"toc_max={n:,} 는 한 번의 도구 호출에서 허용하는 보강 상한"
+                     f"({MAX_TOC_CALLS_PER_TOOL_CALL:,}회)을 넘습니다.",
+            "hint": "나눠서 여러 번 호출하거나 환경변수 NA_MAX_TOC_CALLS_PER_TOOL_CALL 를 "
+                    "올리세요. 검색 예산과는 별도로 셉니다.",
+            "estimated_calls": n, "limit": MAX_TOC_CALLS_PER_TOOL_CALL,
+        }
+    return None
 
 
 def _safe(fn):
@@ -174,7 +209,8 @@ def na_collect(terms: list[str] | None = None, search: str | None = None,
                year_from: int | None = None, year_to: int | None = None,
                formats: list[str] | None = None, out_dir: str | None = None,
                name: str | None = None, save: bool = True,
-               extra_params: dict | None = None) -> dict:
+               extra_params: dict | None = None,
+               toc_max: int = TOC_ENRICH_DEFAULT) -> dict:
     """[수집] 검색어들을 각각 조회해 **합집합**으로 모으고 파일로 저장한다.
 
     terms: `검색항목,키워드` 형식의 검색어 목록. 각각 개별 검색 후 **합집합**(OR)으로 병합한다.
@@ -191,6 +227,14 @@ def na_collect(terms: list[str] | None = None, search: str | None = None,
 
     반환 메타의 `cap_hit_terms` 는 회수 한계(99,000건)에 걸린 검색어를, `incomplete_terms` 는
     재시도 후에도 실패한 페이지가 있는 검색어를 지목한다 — **둘 다 전수가 아니라는 뜻**이다.
+
+    toc_max: 목차 본문을 붙일 **최대 레코드 수**. 0(기본)이면 보강하지 않는다.
+      🔴 비용이 검색과 다르다 — 검색은 1,000건을 1회로 받지만 목차는 **건당 1회**다.
+         `toc_max=300` 이면 최대 300회를 더 쓴다(일일 쿼터 10,000의 3%, 약 4~5분).
+         호출 전에 `목차='Y'` 가 아닌 레코드는 **호출 없이** 걸러내므로 예산은 유효
+         후보에만 쓰인다. 권장 자릿값 300, 하드캡 1,000.
+      본문은 **json·sqlite 로만** 나간다(xlsx 셀 상한·csv 비대화 때문). 표에는
+      `toc_status`·`toc_chars` 두 컬럼이 붙어 어떤 사유로 비었는지 행 단위로 읽힌다.
     """
     if get_api_key() is None:
         return dict(_NO_KEY)
@@ -200,6 +244,9 @@ def na_collect(terms: list[str] | None = None, search: str | None = None,
                          "(형식: `검색항목,키워드`, 예: `전체,교육불평등`)."}
 
     over = _quota_guard(max_records, page_size, len(term_list))
+    if over:
+        return over
+    over = _toc_quota_guard(toc_max)
     if over:
         return over
     client = NaClient()
@@ -223,6 +270,45 @@ def na_collect(terms: list[str] | None = None, search: str | None = None,
     meta["local_filters"] = {"contains": contains, "year_from": year_from,
                              "year_to": year_to,
                              "note": "로컬 후처리 — 회수 한계를 풀어주지 않는다"}
+
+    # ── 목차 보강 ────────────────────────────────────────────────────────────
+    # 로컬 필터 **뒤**에 둔다 — 걸러질 레코드에 쿼터를 쓰지 않기 위해서다.
+    # export **앞**에 둔다 — 보강 결과가 파일에 실려야 하기 때문이다.
+    if int(toc_max) > 0 and records:
+        st = client.enrich_toc(records, int(toc_max), dbname=dbname)
+        meta["toc_enrichment"] = st          # 성공·실패와 무관하게 **항상** 싣는다
+        # 🔴 처방이 다른 세 가지를 **다른 경고**로 분리한다. 하나로 뭉치면 호출자가
+        #    'toc_max 를 올린다'는 잘못된 처방을 실패·중단에도 적용한다.
+        if st["budget_hit"]:
+            meta["toc_enrich_truncated_note"] = (
+                f"목차 후보 {st['candidates']:,}건 중 {st['limit']:,}건만 보강했습니다 "
+                f"({st['not_attempted']:,}건 미시도). **처방: toc_max 를 올리세요.**")
+        if st["failed"]:
+            meta["toc_enrich_incomplete_note"] = (
+                f"{st['failed']:,}건이 조회에 실패했습니다 — **toc_max 상향으로는 해결되지 "
+                f"않습니다.** 이 API 는 없는 제어번호도 ERR04 로 답하므로 일시 오류와 "
+                f"구분되지 않습니다. 실패 제어번호로 `na_toc` 를 단건 호출해 확인하세요: "
+                f"{', '.join(st['failed_controlnos'][:5])}"
+                + (" …" if st["failed_total"] > 5 else ""))
+        if st["aborted"]:
+            meta["toc_enrich_aborted_note"] = (
+                f"보강이 중단됐습니다({st['aborted']}). **처방: toc_max 상향은 오히려 "
+                f"악화됩니다** — 쿼터 소진이나 인증키 문제일 수 있으니 `na_status` 로 확인하세요.")
+        if st["skip_reason"] == "dbname_toc_always_empty":
+            meta["toc_enrich_skip_note"] = (
+                f"dbname='{dbname}' 은 목차가 **전건 없는** 자료종이라(실측) 한 번도 "
+                f"호출하지 않았습니다. 쿼터를 쓰지 않았습니다.")
+        # 본문이 실제로 어디에 실렸는지 — 표만 열어 보고 '목차가 없다'고 오인하지 않도록.
+        fmts = formats or ["xlsx", "csv", "json"]
+        body_fmts = [f for f in fmts if f in ("json", "sqlite")]
+        meta["toc_enrich_output_note"] = (
+            f"목차 **본문**은 {', '.join(body_fmts)} 에만 실립니다. "
+            f"xlsx·csv 에는 `toc_status`·`toc_chars` 컬럼만 있습니다(본문이 수천 자라 "
+            f"셀 상한·파일 크기 문제가 납니다)."
+            if body_fmts else
+            "⚠️ 요청한 형식(" + ", ".join(fmts) + ")에는 목차 **본문이 저장되지 않습니다** — "
+            "본문을 남기려면 formats 에 'json' 또는 'sqlite' 를 넣으세요. "
+            "지금 상태로는 `toc_status`·`toc_chars` 만 남습니다.")
 
     if save and records:
         target = out_dir or str(Path.home() / "na-output")
